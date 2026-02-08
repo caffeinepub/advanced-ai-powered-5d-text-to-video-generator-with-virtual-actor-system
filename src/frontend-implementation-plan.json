@@ -1,0 +1,86 @@
+{
+  "kind": "implementation_plan",
+  "version": "1.0",
+  "title": "Rules-based emotion detection integrated into Create preview pipeline (frontend-only)",
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "summary": "Add a deterministic, browser-only rules-based classifier that maps scene text to {emotion,intensity,energy,mood} with strict enums and clamped intensity.",
+      "acceptanceCriteria": [
+        "A new frontend utility module exists (e.g., under frontend/src/utils/) that exposes a function to classify a scene text into {emotion,intensity,energy,mood}.",
+        "Classification is fully deterministic and runs entirely in the browser (no network calls).",
+        "Returned values are constrained to the allowed enums and intensity is always clamped to [0.0, 1.0]."
+      ],
+      "file_operations": [
+        {
+          "path": "frontend/src/utils/sceneEmotionClassifier.ts",
+          "operation": "create",
+          "description": "Create a deterministic rules-based classifier utility that derives emotion (fear|joy|calm|sadness|anger|surprise|wonder), intensity (clamped 0..1), energy (low|medium|high), and mood (dark|neutral|bright) solely from scene text; ensure no network calls and handle empty/edge-case strings safely."
+        }
+      ]
+    },
+    {
+      "id": "REQ-2",
+      "summary": "Replace backend emotion timeline generation in ScenePreview with a frontend-generated EmotionTimeline[] derived from the rules-based classifier, and ensure VirtualActor facial animation responds.",
+      "acceptanceCriteria": [
+        "frontend/src/components/ScenePreview.tsx no longer depends on the backend useGenerateEmotionTimeline() mutation for emotion generation.",
+        "The preview pipeline produces an EmotionTimeline[] used by <Scene3D ... emotionTimeline={...} /> and the avatar facial animation responds to it via existing VirtualActor logic.",
+        "The emotion timeline generation works for any input text (including short/edge-case strings) without throwing and always produces a valid array (may be a single cue at time 0)."
+      ],
+      "file_operations": [
+        {
+          "path": "frontend/src/utils/emotionTimeline.ts",
+          "operation": "create",
+          "description": "Create a small utility that converts a single classified emotion result into a deterministic EmotionTimeline[] (always returns a valid array; at minimum one cue at time 0) suitable for driving Scene3D/VirutalActor facial animation."
+        },
+        {
+          "path": "frontend/src/components/ScenePreview.tsx",
+          "operation": "modify",
+          "description": "Remove dependency on useGenerateEmotionTimeline() and replace the preview pipeline’s emotion generation step with frontend-only classification + EmotionTimeline[] creation; ensure emotionTimeline state is always set to a valid array for any text input."
+        },
+        {
+          "path": "frontend/src/components/VirtualActor.tsx",
+          "operation": "modify",
+          "description": "Update/extend the emotion-to-blendshape mapping to support the strict emotion enum set (fear|joy|calm|sadness|anger|surprise|wonder), ensuring timeline cues from the frontend classifier reliably affect facial animation without errors."
+        }
+      ]
+    },
+    {
+      "id": "REQ-3",
+      "summary": "Use detected emotion/energy/mood to deterministically bias duration calculations and at least one generation/render parameter in the Create preview pipeline.",
+      "acceptanceCriteria": [
+        "ScenePreview’s duration-related computations are adjusted by an emotion-based duration multiplier mapping: calm×1.3, wonder×1.2, joy×1.1, sadness×1.1, fear×0.8, anger×0.7, surprise×0.6 (default×1.0).",
+        "At least one existing generation step is deterministically influenced by energy and/or mood (e.g., background music synthesis parameters, lighting/fog/environment in Scene3D, or narration duration), and the change is visible/testable by providing different texts (e.g., calm vs fear).",
+        "No backend schema changes are required to support these adjustments."
+      ],
+      "file_operations": [
+        {
+          "path": "frontend/src/components/ScenePreview.tsx",
+          "operation": "modify",
+          "description": "Incorporate emotion-based duration multiplier mapping into duration-related computations (e.g., narration/music/video durations and related metadata) and deterministically vary at least one generation parameter using energy and/or mood (e.g., music synthesis characteristics and/or narration timing) without requiring any backend changes."
+        },
+        {
+          "path": "frontend/src/components/Scene3D.tsx",
+          "operation": "modify",
+          "description": "Deterministically bias at least one visual parameter (e.g., lighting intensity/color, fog density/color, or Environment preset selection) based on the detected energy and/or mood, wired from the Create preview pipeline so differences are visible when using different scene texts."
+        }
+      ]
+    },
+    {
+      "id": "REQ-4",
+      "summary": "Persist the rules-based emotion analysis object in the sceneData JSON saved via addSceneConfig alongside existing gestures/emotions timeline fields.",
+      "acceptanceCriteria": [
+        "When saving a scene config in ScenePreview.saveToBackend(), the sceneData JSON includes the detected emotion analysis object (emotion/intensity/energy/mood) in addition to the existing emotions timeline array.",
+        "The saved JSON remains valid and does not break existing reads (backend continues treating sceneData as opaque Text).",
+        "Generated videos remain savable and viewable in the library after this change."
+      ],
+      "file_operations": [
+        {
+          "path": "frontend/src/components/ScenePreview.tsx",
+          "operation": "modify",
+          "description": "Extend saveToBackend() so the sceneData JSON payload includes the final detected emotion analysis object (emotion/intensity/energy/mood) alongside existing gestures and emotions (timeline) fields, keeping sceneData valid JSON and preserving library save/view behavior."
+        }
+      ]
+    }
+  ]
+}

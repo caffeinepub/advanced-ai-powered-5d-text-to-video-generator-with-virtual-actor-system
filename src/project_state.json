@@ -1,0 +1,120 @@
+{
+  "schemaVersion": "1.0.0",
+  "projectStateVersion": 5,
+  "summary": "AI Video Generator SaaS (GrokVid.ai) with public marketing site + authenticated app for prompt-to-video creation, library management (download/delete), editing, and billing/credits.",
+  "architectural_notes": [
+    "Product name: GrokVid.ai (AI Video Generator SaaS).",
+    "SaaS structure: public pages + authenticated app pages (/dashboard, /create, /library, /editor, /billing, /settings).",
+    "Core flow: prompt -> generate video -> edit -> download.",
+    "Library must support video status (processing/ready) and actions (download/delete).",
+    "Billing model uses credits and tiered plans (Free/Creator/Pro), with watermark/resolution differences.",
+    "Payments planned via Stripe (global) + Razorpay (India) with webhooks to refill credits.",
+    "AI pipeline is asynchronous and should use a queue system for jobs (e.g., BullMQ/Redis or SQS equivalent).",
+    "Planned services: text->video (Runway/Pika/SVD), text->image (Stable Diffusion), voice (ElevenLabs), lipsync (Wav2Lip), LLM prompt enhancement.",
+    "Internet Computer stack constraint: avoid external LLM API calls for emotion detection; implement deterministic rules-based classifier on frontend (TypeScript) and send emotion-annotated scene objects to backend."
+  ],
+  "known_issues": [
+    "Automated build/deploy failed in conversation (\"AI couldn't complete your request\"); may require simplification/retry."
+  ],
+  "isFixRequest": false,
+  "existing_features": [
+    {
+      "id": "feature-implement-a-deterministic-rules-based-emotion-classifier-in-the-frontend-that-outputs-the-strict-schema-emotion-fear-joy-calm-sadness-anger-surprise-wonder-intensity-0-0-1-0-energy-low-medium-high-and-mood-dark-neutral-bright-derived-solely-from-the-user-s-scene-text-no-external-llm-api-calls",
+      "title": "Implement a deterministic, rules-based emotion classifier in the frontend that outputs the strict schema: emotion (fear|joy|calm|sadness|anger|surprise|wonder), intensity (0.0–1.0), energy (low|medium|high), and mood (dark|neutral|bright), derived solely from the user’s scene text (no external LLM/API calls).",
+      "reqIds": [
+        "REQ-1"
+      ],
+      "version": 1
+    },
+    {
+      "id": "feature-integrate-the-rules-based-emotion-classifier-into-the-create-flow-by-replacing-the-current-backend-emotion-timeline-generation-call-in-the-preview-pipeline-with-a-frontend-generated-emotion-timeline-suitable-for-driving-the-virtual-actor-facial-animation",
+      "title": "Integrate the rules-based emotion classifier into the Create flow by replacing the current backend emotion-timeline generation call in the preview pipeline with a frontend-generated emotion timeline suitable for driving the virtual actor facial animation.",
+      "reqIds": [
+        "REQ-2"
+      ],
+      "version": 1
+    },
+    {
+      "id": "feature-use-the-detected-emotion-outputs-emotion-intensity-energy-mood-to-bias-scene-timing-and-generation-parameters-in-the-create-pipeline-apply-an-emotion-duration-multiplier-to-computed-durations-and-use-energy-mood-to-influence-music-narration-and-or-scene-rendering-parameters-in-a-deterministic-way",
+      "title": "Use the detected emotion outputs (emotion, intensity, energy, mood) to bias scene timing and generation parameters in the Create pipeline: apply an emotion duration multiplier to computed durations, and use energy/mood to influence music/narration and/or scene rendering parameters in a deterministic way.",
+      "reqIds": [
+        "REQ-3"
+      ],
+      "version": 1
+    },
+    {
+      "id": "feature-persist-the-rules-based-emotion-analysis-as-part-of-the-saved-scene-configuration-json-payload-stored-via-addsceneconfig-alongside-the-existing-gestures-emotions-fields-so-the-backend-receives-the-final-emotion-annotated-scene-object-data",
+      "title": "Persist the rules-based emotion analysis as part of the saved scene configuration JSON payload stored via addSceneConfig, alongside the existing gestures/emotions fields, so the backend receives the final emotion-annotated scene object data.",
+      "reqIds": [
+        "REQ-4"
+      ],
+      "version": 1
+    }
+  ],
+  "new_feature_requests": [
+    {
+      "id": "AR-1",
+      "summary": "Build public marketing website pages (landing, pricing, features, examples, contact, privacy, terms) plus login/signup pages",
+      "reqIds": [],
+      "status": "pending"
+    },
+    {
+      "id": "AR-2",
+      "summary": "Implement authentication (JWT-style) with user accounts, roles, and security basics (rate limiting/abuse filtering)",
+      "reqIds": [],
+      "status": "pending"
+    },
+    {
+      "id": "AR-3",
+      "summary": "Create authenticated app shell with dashboard (credit balance, recent videos, generate button)",
+      "reqIds": [],
+      "status": "pending"
+    },
+    {
+      "id": "AR-4",
+      "summary": "Implement Create page with Grok-style chat UI and video generation options (style, length, language, character type)",
+      "reqIds": [],
+      "status": "pending"
+    },
+    {
+      "id": "AR-5",
+      "summary": "Implement Library page listing generated videos with status and actions (download + delete)",
+      "reqIds": [],
+      "status": "pending"
+    },
+    {
+      "id": "AR-6",
+      "summary": "Implement Editor page (preview, voice change, subtitle toggle, export resolution)",
+      "reqIds": [],
+      "status": "pending"
+    },
+    {
+      "id": "AR-7",
+      "summary": "Implement billing/credits system with plans and payments (Stripe + Razorpay) including webhooks and credit refill",
+      "reqIds": [],
+      "status": "pending"
+    },
+    {
+      "id": "AR-8",
+      "summary": "Implement AI job pipeline orchestration (prompt enhancer, scene split, image/video/voice/lipsync, final render, storage, notifications) with queue system (Redis/BullMQ or SQS equivalent)",
+      "reqIds": [],
+      "status": "pending"
+    },
+    {
+      "id": "AR-9",
+      "summary": "Define and implement core database schema (Users, Projects, Videos, Billing)",
+      "reqIds": [],
+      "status": "pending"
+    },
+    {
+      "id": "AR-10",
+      "summary": "Integrate rules-based scene emotion detection into Create flow/pipeline (frontend TypeScript) to annotate scenes with emotion/intensity/energy/mood and feed timing + prompt enrichment",
+      "reqIds": [],
+      "status": "pending"
+    }
+  ],
+  "gameProjectType": "none",
+  "projectName": "GrokVid.ai",
+  "clarification_mode": "instant",
+  "clarification_rounds": 0
+}

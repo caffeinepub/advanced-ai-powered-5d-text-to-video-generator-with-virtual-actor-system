@@ -11,9 +11,7 @@ import AccessControl "authorization/access-control";
 import Storage "blob-storage/Storage";
 import MixinStorage "blob-storage/Mixin";
 import MixinAuthorization "authorization/MixinAuthorization";
-import Migration "migration";
 
-(with migration = Migration.run)
 actor {
   // Include role-based access control using prefabricated user system
   let accessControlState = AccessControl.initState();
@@ -330,6 +328,7 @@ actor {
   };
 
   public query ({ caller }) func getVideo(id : VideoId) : async Video {
+    // Public read access - no authorization check needed
     switch (videoMap.get(id)) {
       case (null) { Runtime.trap("Video not found") };
       case (?video) { video };
@@ -337,6 +336,7 @@ actor {
   };
 
   public query ({ caller }) func getAudio(id : AudioId) : async Audio {
+    // Public read access - no authorization check needed
     switch (audioMap.get(id)) {
       case (null) { Runtime.trap("Audio not found") };
       case (?audio) { audio };
@@ -344,6 +344,7 @@ actor {
   };
 
   public query ({ caller }) func getBackgroundMusic(id : MusicId) : async BackgroundMusic {
+    // Public read access - no authorization check needed
     switch (musicMap.get(id)) {
       case (null) { Runtime.trap("Music not found") };
       case (?music) { music };
@@ -351,6 +352,7 @@ actor {
   };
 
   public query ({ caller }) func getSceneConfig(id : SceneConfigId) : async SceneConfig {
+    // Public read access - no authorization check needed
     switch (sceneConfigMap.get(id)) {
       case (null) { Runtime.trap("Scene config not found") };
       case (?config) { config };
@@ -358,38 +360,47 @@ actor {
   };
 
   public query ({ caller }) func getVideosByCreator(creator : Principal) : async [Video] {
+    // Public read access - no authorization check needed
     videoList.toArray().filter(func(video) { video.metadata.createdBy == creator });
   };
 
   public query ({ caller }) func getAudioByCreator(creator : Principal) : async [Audio] {
+    // Public read access - no authorization check needed
     audioList.toArray().filter(func(audio) { audio.metadata.createdBy == creator });
   };
 
   public query ({ caller }) func getMusicByCreator(creator : Principal) : async [BackgroundMusic] {
+    // Public read access - no authorization check needed
     musicList.toArray().filter(func(music) { music.metadata.createdBy == creator });
   };
 
   public query ({ caller }) func getSceneConfigsByCreator(creator : Principal) : async [SceneConfig] {
+    // Public read access - no authorization check needed
     sceneConfigList.toArray().filter(func(config) { config.createdBy == creator });
   };
 
   public query ({ caller }) func getAllVideosSorted() : async [Video] {
+    // Public read access - no authorization check needed
     videoList.toArray().sort();
   };
 
   public query ({ caller }) func getAllAudioSorted() : async [Audio] {
+    // Public read access - no authorization check needed
     audioList.toArray().sort();
   };
 
   public query ({ caller }) func getAllMusicSorted() : async [BackgroundMusic] {
+    // Public read access - no authorization check needed
     musicList.toArray().sort();
   };
 
   public query ({ caller }) func getAllSceneConfigsSorted() : async [SceneConfig] {
+    // Public read access - no authorization check needed
     sceneConfigList.toArray().sort();
   };
 
   public query ({ caller }) func findVideosByTitle(title : Text) : async [Video] {
+    // Public read access - no authorization check needed
     videoList.toArray().filter(func(video) { video.metadata.title.contains(#text title) });
   };
 
@@ -469,10 +480,12 @@ actor {
   };
 
   public query ({ caller }) func getGesture(id : GestureId) : async ?Gesture {
+    // Public read access - no authorization check needed
     virtualActorSystem.gestureLibrary.get(id);
   };
 
   public query ({ caller }) func getAllGestures() : async [Gesture] {
+    // Public read access - no authorization check needed
     let gestureIter = virtualActorSystem.gestureLibrary.values();
     gestureIter.toArray();
   };
@@ -506,10 +519,12 @@ actor {
   };
 
   public query ({ caller }) func getEmotion(id : EmotionId) : async ?Emotion {
+    // Public read access - no authorization check needed
     virtualActorSystem.emotionLibrary.get(id);
   };
 
   public query ({ caller }) func getAllEmotions() : async [Emotion] {
+    // Public read access - no authorization check needed
     let emotionIter = virtualActorSystem.emotionLibrary.values();
     emotionIter.toArray();
   };
@@ -547,10 +562,12 @@ actor {
   };
 
   public query ({ caller }) func getAvatar(id : AvatarId) : async ?Avatar {
+    // Public read access - no authorization check needed
     virtualActorSystem.avatarLibrary.get(id);
   };
 
   public query ({ caller }) func getAllAvatars() : async [Avatar] {
+    // Public read access - no authorization check needed
     let avatarIter = virtualActorSystem.avatarLibrary.values();
     avatarIter.toArray();
   };
@@ -595,10 +612,8 @@ actor {
     [];
   };
 
-  public shared ({ caller }) func getGestureAnimation(gestureId : GestureId) : async Storage.ExternalBlob {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can access gesture animations");
-    };
+  public query ({ caller }) func getGestureAnimation(gestureId : GestureId) : async Storage.ExternalBlob {
+    // Public read access - no authorization check needed
     switch (virtualActorSystem.gestureLibrary.get(gestureId)) {
       case (null) {
         Runtime.trap("Gesture not found");
@@ -608,12 +623,14 @@ actor {
   };
 
   public query ({ caller }) func getAvailableGestures() : async [Text] {
+    // Public read access - no authorization check needed
     let gestureIter = virtualActorSystem.gestureLibrary.values();
     let gestureArray = gestureIter.toArray();
     gestureArray.map(func(gesture) { gesture.name });
   };
 
   public query ({ caller }) func getAvailableEmotions() : async [Text] {
+    // Public read access - no authorization check needed
     let emotionIter = virtualActorSystem.emotionLibrary.values();
     let emotionArray = emotionIter.toArray();
     emotionArray.map(func(emotion) { emotion.name });

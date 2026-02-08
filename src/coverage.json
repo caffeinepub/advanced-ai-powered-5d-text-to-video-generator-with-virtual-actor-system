@@ -1,0 +1,80 @@
+{
+  "kind": "coverage_report",
+  "version": "1.0",
+  "generatedAt": "2026-02-06T03:10:06.835Z",
+  "sources": {
+    "buildRequest": true,
+    "implementationPlan": true
+  },
+  "requirements": {
+    "total": 4,
+    "implemented": 4,
+    "items": [
+      {
+        "id": "REQ-1",
+        "summary": "Implement a deterministic, rules-based emotion classifier in the frontend that outputs the strict schema: emotion (fear|joy|calm|sadness|anger|surprise|wonder), intensity (0.0–1.0), energy (low|medium|high), and mood (dark|neutral|bright), derived solely from the user’s scene text (no external LLM/API calls).",
+        "status": "implemented",
+        "plannedFiles": [
+          "frontend/src/utils/sceneEmotionClassifier.ts"
+        ],
+        "matchedFiles": [
+          "frontend/src/utils/sceneEmotionClassifier.ts"
+        ]
+      },
+      {
+        "id": "REQ-2",
+        "summary": "Integrate the rules-based emotion classifier into the Create flow by replacing the current backend emotion-timeline generation call in the preview pipeline with a frontend-generated emotion timeline suitable for driving the virtual actor facial animation.",
+        "status": "implemented",
+        "plannedFiles": [
+          "frontend/src/utils/emotionTimeline.ts",
+          "frontend/src/components/ScenePreview.tsx",
+          "frontend/src/components/VirtualActor.tsx"
+        ],
+        "matchedFiles": [
+          "frontend/src/utils/emotionTimeline.ts",
+          "frontend/src/components/ScenePreview.tsx",
+          "frontend/src/components/VirtualActor.tsx"
+        ]
+      },
+      {
+        "id": "REQ-3",
+        "summary": "Use the detected emotion outputs (emotion, intensity, energy, mood) to bias scene timing and generation parameters in the Create pipeline: apply an emotion duration multiplier to computed durations, and use energy/mood to influence music/narration and/or scene rendering parameters in a deterministic way.",
+        "status": "implemented",
+        "plannedFiles": [
+          "frontend/src/components/ScenePreview.tsx",
+          "frontend/src/components/Scene3D.tsx"
+        ],
+        "matchedFiles": [
+          "frontend/src/components/ScenePreview.tsx",
+          "frontend/src/components/Scene3D.tsx"
+        ]
+      },
+      {
+        "id": "REQ-4",
+        "summary": "Persist the rules-based emotion analysis as part of the saved scene configuration JSON payload stored via addSceneConfig, alongside the existing gestures/emotions fields, so the backend receives the final emotion-annotated scene object data.",
+        "status": "implemented",
+        "plannedFiles": [
+          "frontend/src/components/ScenePreview.tsx"
+        ],
+        "matchedFiles": [
+          "frontend/src/components/ScenePreview.tsx"
+        ]
+      }
+    ]
+  },
+  "changedFiles": [
+    "build-request.json",
+    "feature_evidence.json",
+    "frontend-file-summaries.txt",
+    "frontend-implementation-plan.json",
+    "frontend/src/components/Scene3D.tsx",
+    "frontend/src/components/ScenePreview.tsx",
+    "frontend/src/components/VirtualActor.tsx",
+    "frontend/src/utils/emotionTimeline.ts",
+    "frontend/src/utils/sceneEmotionClassifier.ts",
+    "project_state.json",
+    "scratch/component-selection.json",
+    "spec.md",
+    "spec_vs_diff_report.json"
+  ]
+}

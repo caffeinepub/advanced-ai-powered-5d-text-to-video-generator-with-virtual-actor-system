@@ -11,13 +11,18 @@ import {
   useAddAudio,
   useAddBackgroundMusic,
   useAddSceneConfig,
-  useGenerateGestureTimeline,
-  useGenerateEmotionTimeline,
   useGetCallerUserProfile,
   useGetAvatar,
 } from '../hooks/useQueries';
 import { ExternalBlob, GestureCue, EmotionTimeline } from '../backend';
 import { toast } from 'sonner';
+import { 
+  classifySceneEmotion, 
+  getEmotionDurationMultiplier,
+  getEmotionMusicParameters,
+  type EmotionAnalysis 
+} from '../utils/sceneEmotionClassifier';
+import { generateEmotionTimeline, generateGestureCues } from '../utils/emotionTimeline';
 
 interface ScenePreviewProps {
   text: string;
@@ -55,6 +60,7 @@ export default function ScenePreview({
   const [isRetrying, setIsRetrying] = useState(false);
   const [gestureCues, setGestureCues] = useState<GestureCue[]>([]);
   const [emotionTimeline, setEmotionTimeline] = useState<EmotionTimeline[]>([]);
+  const [emotionAnalysis, setEmotionAnalysis] = useState<EmotionAnalysis | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -64,8 +70,6 @@ export default function ScenePreview({
   const addAudio = useAddAudio();
   const addMusic = useAddBackgroundMusic();
   const addSceneConfig = useAddSceneConfig();
-  const generateGestures = useGenerateGestureTimeline();
-  const generateEmotions = useGenerateEmotionTimeline();
 
   useEffect(() => {
     if (isGenerating && text) {
@@ -143,40 +147,47 @@ export default function ScenePreview({
     try {
       setVideoError(null);
 
-      // Stage 1: Analyzing text
-      setStage('Analyzing scene description...');
+      // Stage 1: Analyzing text and detecting emotion
+      setStage('Analyzing scene emotion and mood...');
       setProgress(10);
+      const analysis = classifySceneEmotion(text);
+      setEmotionAnalysis(analysis);
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // Stage 2: Generating gesture timeline
+      // Calculate emotion-adjusted duration
+      const baseDuration = Math.min(text.length / 10, 10);
+      const durationMultiplier = getEmotionDurationMultiplier(analysis.emotion);
+      const adjustedDuration = baseDuration * durationMultiplier;
+
+      // Stage 2: Generating gesture timeline (frontend-based)
       setStage('Generating gesture timeline...');
       setProgress(20);
-      const gestures = await generateGestures.mutateAsync(text);
+      const gestures = generateGestureCues(analysis, adjustedDuration);
       setGestureCues(gestures);
       await new Promise((resolve) => setTimeout(resolve, 800));
 
-      // Stage 3: Generating emotion timeline
+      // Stage 3: Generating emotion timeline (frontend-based)
       setStage('Generating emotion timeline...');
       setProgress(30);
-      const emotions = await generateEmotions.mutateAsync(text);
+      const emotions = generateEmotionTimeline(analysis, adjustedDuration);
       setEmotionTimeline(emotions);
       await new Promise((resolve) => setTimeout(resolve, 800));
 
       // Stage 4: Generating 3D scene
-      setStage('Generating 3D environment with virtual actor...');
+      setStage(`Generating 3D environment (${analysis.emotion} mood)...`);
       setProgress(45);
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      // Stage 5: Creating narration
+      // Stage 5: Creating narration (emotion-adjusted duration)
       setStage('Creating voice narration with lip-sync...');
       setProgress(60);
-      const narration = await generateNarration(text);
+      const narration = await generateNarration(text, adjustedDuration);
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // Stage 6: Composing music
-      setStage('Composing background music...');
+      // Stage 6: Composing music (emotion-based parameters)
+      setStage(`Composing ${analysis.emotion} background music...`);
       setProgress(75);
-      const music = await generateMusic(text);
+      const music = await generateMusic(text, analysis);
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
       // Stage 7: Rendering video
@@ -187,11 +198,11 @@ export default function ScenePreview({
       // Stage 8: Saving to backend
       setStage('Saving to your library...');
       setProgress(95);
-      const externalBlob = await saveToBackend(text, videoData, narration, music);
+      const externalBlob = await saveToBackend(text, videoData, narration, music, analysis, adjustedDuration);
 
       setProgress(100);
       setStage('Complete!');
-      toast.success('Video with virtual actor generated successfully!');
+      toast.success(`Video with ${analysis.emotion} emotion generated successfully!`);
 
       // Convert ExternalBlob to blob URL for playback
       await loadVideoFromExternalBlob(externalBlob);
@@ -331,10 +342,9 @@ export default function ScenePreview({
     }
   };
 
-  const generateNarration = async (text: string): Promise<Blob> => {
+  const generateNarration = async (text: string, duration: number): Promise<Blob> => {
     return new Promise((resolve) => {
       const audioContext = new AudioContext();
-      const duration = Math.min(text.length / 10, 10);
       const sampleRate = audioContext.sampleRate;
       const buffer = audioContext.createBuffer(1, sampleRate * duration, sampleRate);
 
@@ -348,22 +358,23 @@ export default function ScenePreview({
     });
   };
 
-  const generateMusic = async (text: string): Promise<Blob> => {
+  const generateMusic = async (text: string, analysis: EmotionAnalysis): Promise<Blob> => {
     const audioContext = new AudioContext();
     const duration = 10;
     const sampleRate = audioContext.sampleRate;
     const buffer = audioContext.createBuffer(2, sampleRate * duration, sampleRate);
 
-    const isCalm = /serene|peaceful|calm|gentle|quiet/i.test(text);
-    const isEnergetic = /energetic|fast|exciting|dynamic|vibrant/i.test(text);
-
-    const baseFreq = isCalm ? 220 : isEnergetic ? 440 : 330;
+    // Get emotion-based music parameters
+    const musicParams = getEmotionMusicParameters(analysis.emotion, analysis.energy);
 
     for (let channel = 0; channel < 2; channel++) {
       const data = buffer.getChannelData(channel);
       for (let i = 0; i < data.length; i++) {
         const t = i / sampleRate;
-        data[i] = Math.sin(2 * Math.PI * baseFreq * t) * 0.05 * Math.exp(-t / 5);
+        data[i] = 
+          Math.sin(2 * Math.PI * musicParams.baseFrequency * t * musicParams.tempo) * 
+          0.05 * 
+          Math.exp(-t / musicParams.decay);
       }
     }
 
@@ -409,7 +420,9 @@ export default function ScenePreview({
     text: string,
     videoData: Blob,
     narration: Blob,
-    music: Blob
+    music: Blob,
+    analysis: EmotionAnalysis,
+    duration: number
   ): Promise<ExternalBlob> => {
     if (!identity) throw new Error('Not authenticated');
 
@@ -437,14 +450,14 @@ export default function ScenePreview({
         id: videoId,
         title: text.substring(0, 50),
         description: text,
-        duration: BigInt(10),
+        duration: BigInt(Math.round(duration)),
         createdBy: identity.getPrincipal(),
         uploadDate: now,
         visuals: [
           {
             effectType: { lighting: null } as any,
-            intensity: BigInt(80),
-            duration: BigInt(10),
+            intensity: BigInt(Math.round(analysis.intensity * 100)),
+            duration: BigInt(Math.round(duration)),
             startTime: BigInt(0),
           },
         ],
@@ -466,7 +479,7 @@ export default function ScenePreview({
         videoId,
         speakerId: identity.getPrincipal(),
         language: 'en',
-        duration: BigInt(10),
+        duration: BigInt(Math.round(duration)),
         createdBy: identity.getPrincipal(),
         uploadDate: now,
       },
@@ -477,13 +490,14 @@ export default function ScenePreview({
       metadata: {
         id: musicId,
         videoId,
-        genre: 'ambient',
-        duration: BigInt(10),
+        genre: analysis.emotion,
+        duration: BigInt(Math.round(duration)),
         createdBy: identity.getPrincipal(),
         uploadDate: now,
       },
     });
 
+    // Save scene config with emotion analysis
     await addSceneConfig.mutateAsync({
       id: sceneId,
       videoId,
@@ -492,6 +506,7 @@ export default function ScenePreview({
         timestamp: Date.now(),
         gestures: gestureCues,
         emotions: emotionTimeline,
+        emotionAnalysis: analysis,
         avatarId: userProfile?.avatarId,
       }),
       createdBy: identity.getPrincipal(),
@@ -561,6 +576,8 @@ export default function ScenePreview({
         <CardDescription>
           {isGenerating
             ? 'Generating your immersive 3D video with AI-driven virtual actor...'
+            : emotionAnalysis
+            ? `Your generated 3D scene with ${emotionAnalysis.emotion} emotion (${emotionAnalysis.energy} energy, ${emotionAnalysis.mood} mood)`
             : 'Your generated 3D scene with virtual actor performance'}
         </CardDescription>
       </CardHeader>
@@ -625,6 +642,7 @@ export default function ScenePreview({
               avatarUrl={avatarUrl}
               gestureCues={gestureCues}
               emotionTimeline={emotionTimeline}
+              emotionAnalysis={emotionAnalysis}
             />
           )}
 

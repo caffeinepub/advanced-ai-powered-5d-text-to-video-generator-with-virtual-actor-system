@@ -12,9 +12,14 @@ interface VirtualActorProps {
   isPlaying: boolean;
 }
 
-// Emotion to blendshape mapping
+// Emotion to blendshape mapping - extended to support all emotion types
 const EMOTION_BLENDSHAPES: Record<string, Record<string, number>> = {
   happy: {
+    mouthSmile: 0.8,
+    eyeSquint: 0.3,
+    cheekPuff: 0.2,
+  },
+  joy: {
     mouthSmile: 0.8,
     eyeSquint: 0.3,
     cheekPuff: 0.2,
@@ -24,7 +29,17 @@ const EMOTION_BLENDSHAPES: Record<string, Record<string, number>> = {
     browInnerUp: 0.6,
     eyeWide: 0.2,
   },
+  sadness: {
+    mouthFrown: 0.7,
+    browInnerUp: 0.6,
+    eyeWide: 0.2,
+  },
   angry: {
+    browDown: 0.8,
+    mouthFrown: 0.5,
+    jawForward: 0.4,
+  },
+  anger: {
     browDown: 0.8,
     mouthFrown: 0.5,
     jawForward: 0.4,
@@ -37,6 +52,17 @@ const EMOTION_BLENDSHAPES: Record<string, Record<string, number>> = {
   calm: {
     mouthSmile: 0.2,
     eyesClosed: 0.1,
+  },
+  surprise: {
+    eyeWide: 1.0,
+    browInnerUp: 0.8,
+    mouthOpen: 0.7,
+    jawDrop: 0.5,
+  },
+  wonder: {
+    eyeWide: 0.6,
+    browInnerUp: 0.4,
+    mouthSmile: 0.3,
   },
 };
 

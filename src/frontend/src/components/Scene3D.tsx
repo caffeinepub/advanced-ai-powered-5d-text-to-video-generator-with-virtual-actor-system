@@ -4,6 +4,7 @@ import { OrbitControls, Stars, Float, Environment, PerspectiveCamera } from '@re
 import * as THREE from 'three';
 import VirtualActor from './VirtualActor';
 import { GestureCue, EmotionTimeline } from '../backend';
+import { EmotionAnalysis, getEmotionVisualModifiers } from '../utils/sceneEmotionClassifier';
 
 interface Scene3DProps {
   text: string;
@@ -12,6 +13,7 @@ interface Scene3DProps {
   avatarUrl?: string;
   gestureCues?: GestureCue[];
   emotionTimeline?: EmotionTimeline[];
+  emotionAnalysis?: EmotionAnalysis | null;
 }
 
 function AnalyzeText(text: string) {
@@ -112,13 +114,15 @@ function SceneContent({
   isPlaying, 
   avatarUrl, 
   gestureCues = [], 
-  emotionTimeline = [] 
+  emotionTimeline = [],
+  emotionAnalysis
 }: { 
   text: string; 
   isPlaying: boolean;
   avatarUrl?: string;
   gestureCues?: GestureCue[];
   emotionTimeline?: EmotionTimeline[];
+  emotionAnalysis?: EmotionAnalysis | null;
 }) {
   const [currentTime, setCurrentTime] = useState(0);
   const analysis = useMemo(() => AnalyzeText(text), [text]);
@@ -128,6 +132,16 @@ function SceneContent({
       setCurrentTime((prev) => prev + delta);
     }
   });
+
+  // Apply emotion-based visual modifiers
+  const visualModifiers = emotionAnalysis 
+    ? getEmotionVisualModifiers(emotionAnalysis.emotion, emotionAnalysis.mood)
+    : null;
+
+  const baseLightIntensity = analysis.isNight ? 0.5 : analysis.isDawn ? 0.8 : 1.0;
+  const emotionLightingMultiplier = visualModifiers?.emotion.lighting || 1.0;
+  const moodLightingBoost = visualModifiers?.mood.lightingBoost || 1.0;
+  const finalLightIntensity = baseLightIntensity * emotionLightingMultiplier * moodLightingBoost;
 
   const lightColor = analysis.isNight
     ? '#4169e1'
@@ -143,6 +157,26 @@ function SceneContent({
     ? '#ff00ff'
     : '#ffaa00';
 
+  // Emotion-based environment preset
+  const environmentPreset = emotionAnalysis?.mood === 'dark' 
+    ? 'night' 
+    : emotionAnalysis?.mood === 'bright' 
+    ? 'sunset' 
+    : analysis.isNight 
+    ? 'night' 
+    : 'sunset';
+
+  // Fog color and density based on emotion
+  const fogColor = emotionAnalysis?.mood === 'dark' 
+    ? '#000033' 
+    : emotionAnalysis?.mood === 'bright' 
+    ? '#87ceeb' 
+    : analysis.isNight 
+    ? '#000033' 
+    : '#87ceeb';
+
+  const fogDensityMultiplier = visualModifiers?.mood.fogDensity || 1.0;
+
   return (
     <>
       <PerspectiveCamera makeDefault position={[0, 2, 10]} />
@@ -153,25 +187,29 @@ function SceneContent({
         autoRotateSpeed={0.5}
       />
 
-      {/* Lighting */}
-      <ambientLight intensity={0.3} />
+      {/* Lighting with emotion-based intensity */}
+      <ambientLight intensity={0.3 * emotionLightingMultiplier} />
       <directionalLight
         position={[10, 10, 5]}
-        intensity={1}
+        intensity={finalLightIntensity}
         color={lightColor}
         castShadow
       />
-      <pointLight position={[-10, 10, -5]} intensity={0.5} color={lightColor} />
+      <pointLight 
+        position={[-10, 10, -5]} 
+        intensity={0.5 * emotionLightingMultiplier} 
+        color={lightColor} 
+      />
       <spotLight
         position={[0, 15, 0]}
         angle={0.3}
         penumbra={1}
-        intensity={0.5}
+        intensity={0.5 * emotionLightingMultiplier}
         castShadow
       />
 
-      {/* Environment */}
-      <Environment preset={analysis.isNight ? 'night' : 'sunset'} />
+      {/* Environment with emotion-based preset */}
+      <Environment preset={environmentPreset as any} />
       <Stars
         radius={100}
         depth={50}
@@ -203,8 +241,8 @@ function SceneContent({
       {/* Particles */}
       {analysis.hasParticles && <Particles count={200} analysis={analysis} />}
 
-      {/* Fog */}
-      <fog attach="fog" args={[analysis.isNight ? '#000033' : '#87ceeb', 10, 50]} />
+      {/* Fog with emotion-based density */}
+      <fog attach="fog" args={[fogColor, 10 * fogDensityMultiplier, 50 * fogDensityMultiplier]} />
     </>
   );
 }
@@ -215,7 +253,8 @@ export default function Scene3D({
   isMuted, 
   avatarUrl, 
   gestureCues, 
-  emotionTimeline 
+  emotionTimeline,
+  emotionAnalysis
 }: Scene3DProps) {
   return (
     <div className="h-full w-full">
@@ -226,6 +265,7 @@ export default function Scene3D({
           avatarUrl={avatarUrl}
           gestureCues={gestureCues}
           emotionTimeline={emotionTimeline}
+          emotionAnalysis={emotionAnalysis}
         />
       </Canvas>
     </div>

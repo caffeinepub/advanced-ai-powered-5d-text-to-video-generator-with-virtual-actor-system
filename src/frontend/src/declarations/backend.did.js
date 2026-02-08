@@ -204,7 +204,7 @@ export const idlService = IDL.Service({
   'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
   'getEmotion' : IDL.Func([EmotionId], [IDL.Opt(Emotion)], ['query']),
   'getGesture' : IDL.Func([GestureId], [IDL.Opt(Gesture)], ['query']),
-  'getGestureAnimation' : IDL.Func([GestureId], [ExternalBlob], []),
+  'getGestureAnimation' : IDL.Func([GestureId], [ExternalBlob], ['query']),
   'getMusicByCreator' : IDL.Func(
       [IDL.Principal],
       [IDL.Vec(BackgroundMusic)],
@@ -444,7 +444,7 @@ export const idlFactory = ({ IDL }) => {
     'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
     'getEmotion' : IDL.Func([EmotionId], [IDL.Opt(Emotion)], ['query']),
     'getGesture' : IDL.Func([GestureId], [IDL.Opt(Gesture)], ['query']),
-    'getGestureAnimation' : IDL.Func([GestureId], [ExternalBlob], []),
+    'getGestureAnimation' : IDL.Func([GestureId], [ExternalBlob], ['query']),
     'getMusicByCreator' : IDL.Func(
         [IDL.Principal],
         [IDL.Vec(BackgroundMusic)],

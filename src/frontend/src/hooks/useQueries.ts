@@ -44,6 +44,19 @@ export function useGetUserVideos() {
   });
 }
 
+export function useGetVideo(videoId: string | undefined) {
+  const { actor, isFetching } = useActor();
+
+  return useQuery<Video | null>({
+    queryKey: ['video', videoId],
+    queryFn: async () => {
+      if (!actor || !videoId) return null;
+      return actor.getVideo(videoId);
+    },
+    enabled: !!actor && !isFetching && !!videoId,
+  });
+}
+
 export function useAddVideo() {
   const { actor } = useActor();
   const queryClient = useQueryClient();

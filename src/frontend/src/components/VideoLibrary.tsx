@@ -1,8 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Download, Play, RefreshCw } from 'lucide-react';
+import { Download, Play, RefreshCw, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useGetUserVideos } from '../hooks/useQueries';
 import { useInternetIdentity } from '../hooks/useInternetIdentity';
@@ -20,6 +30,7 @@ export default function VideoLibrary() {
   const { identity, login } = useInternetIdentity();
   const { data: videos, isLoading } = useGetUserVideos();
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
+  const [videoToDelete, setVideoToDelete] = useState<Video | null>(null);
   const [playbackState, setPlaybackState] = useState<VideoPlaybackState>({
     url: null,
     mimeType: 'video/mp4',
@@ -29,7 +40,6 @@ export default function VideoLibrary() {
   const [isLoadingVideo, setIsLoadingVideo] = useState(false);
 
   useEffect(() => {
-    // Cleanup blob URL when dialog closes or component unmounts
     return () => {
       if (playbackState.url) {
         URL.revokeObjectURL(playbackState.url);
@@ -38,10 +48,8 @@ export default function VideoLibrary() {
   }, [playbackState.url]);
 
   const detectMimeType = (bytes: Uint8Array): string => {
-    // Check file signature (magic numbers) to detect format
-    if (bytes.length < 12) return 'video/mp4'; // Default fallback
+    if (bytes.length < 12) return 'video/mp4';
 
-    // MP4 signature: starts with ftyp
     if (
       bytes[4] === 0x66 &&
       bytes[5] === 0x74 &&
@@ -51,7 +59,6 @@ export default function VideoLibrary() {
       return 'video/mp4';
     }
 
-    // WebM signature: starts with 0x1A 0x45 0xDF 0xA3
     if (
       bytes[0] === 0x1a &&
       bytes[1] === 0x45 &&
@@ -61,18 +68,16 @@ export default function VideoLibrary() {
       return 'video/webm';
     }
 
-    // MOV signature: similar to MP4 but with different ftyp
     if (
       bytes[4] === 0x66 &&
       bytes[5] === 0x74 &&
       bytes[6] === 0x79 &&
       bytes[7] === 0x70 &&
-      (bytes[8] === 0x71 || bytes[8] === 0x6d) // qt or mov
+      (bytes[8] === 0x71 || bytes[8] === 0x6d)
     ) {
       return 'video/quicktime';
     }
 
-    // Default to MP4 if unknown
     return 'video/mp4';
   };
 
@@ -87,21 +92,14 @@ export default function VideoLibrary() {
     setVideoError(null);
 
     try {
-      // Get bytes from ExternalBlob
       const bytes = await externalBlob.getBytes();
-
-      // Detect MIME type from blob metadata or file signature
       let mimeType = video.metadata.format?.mimeType || detectMimeType(bytes);
-
-      // Create blob with detected MIME type
       let blob = new Blob([bytes], { type: mimeType });
 
-      // Revoke old URL if exists to prevent memory leaks
       if (playbackState.url) {
         URL.revokeObjectURL(playbackState.url);
       }
 
-      // Create object URL for browser playback
       const url = URL.createObjectURL(blob);
 
       setPlaybackState({
@@ -112,7 +110,6 @@ export default function VideoLibrary() {
     } catch (error) {
       console.error('Error loading video blob:', error);
 
-      // Retry mechanism for failed blob fetches
       if (retryCount < MAX_RETRIES) {
         console.log(`Retrying video load (${retryCount + 1}/${MAX_RETRIES})...`);
         await new Promise((resolve) => setTimeout(resolve, 1000 * (retryCount + 1)));
@@ -138,7 +135,6 @@ export default function VideoLibrary() {
 
   const handleRetryLoad = async () => {
     if (selectedVideo) {
-      // Revoke old URL before retry
       if (playbackState.url) {
         URL.revokeObjectURL(playbackState.url);
       }
@@ -152,7 +148,6 @@ export default function VideoLibrary() {
 
     if (!selectedVideo) return;
 
-    // Try alternative MIME types
     const currentMimeType = playbackState.mimeType;
     const alternativeMimeTypes = ['video/mp4', 'video/webm', 'video/quicktime'].filter(
       (type) => type !== currentMimeType
@@ -206,7 +201,6 @@ export default function VideoLibrary() {
       a.download = `${video.metadata.title.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}${extension}`;
       a.click();
 
-      // Cleanup temporary URL after download
       URL.revokeObjectURL(url);
       toast.success('Video downloaded!');
     } catch (error) {
@@ -215,8 +209,25 @@ export default function VideoLibrary() {
     }
   };
 
+  const handleDeleteClick = (video: Video, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setVideoToDelete(video);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!videoToDelete) return;
+
+    try {
+      // Note: Backend doesn't have delete video functionality yet
+      toast.info('Delete functionality will be available soon');
+      setVideoToDelete(null);
+    } catch (error) {
+      console.error('Delete error:', error);
+      toast.error('Failed to delete video');
+    }
+  };
+
   const handleCloseDialog = () => {
-    // Cleanup blob URL when closing dialog to prevent memory leaks
     if (playbackState.url) {
       URL.revokeObjectURL(playbackState.url);
     }
@@ -306,6 +317,14 @@ export default function VideoLibrary() {
                     onClick={(e) => handleDownload(video, e)}
                   >
                     <Download className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-destructive hover:text-destructive"
+                    onClick={(e) => handleDeleteClick(video, e)}
+                  >
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
@@ -410,6 +429,23 @@ export default function VideoLibrary() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!videoToDelete} onOpenChange={() => setVideoToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Video</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{videoToDelete?.metadata.title}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
