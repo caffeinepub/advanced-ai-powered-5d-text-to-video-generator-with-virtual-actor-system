@@ -4,13 +4,13 @@ import { Sparkles, Video, TrendingUp, Clock } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useInternetIdentity } from '../hooks/useInternetIdentity';
-import { useGetUserVideos, useGetCallerUserProfile } from '../hooks/useQueries';
+import { useGetVideosByCreator, useGetCallerUserProfile } from '../hooks/useQueries';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { identity, login } = useInternetIdentity();
-  const { data: videos, isLoading: videosLoading } = useGetUserVideos();
+  const { data: videos, isLoading: videosLoading } = useGetVideosByCreator(identity?.getPrincipal());
   const { data: profile, isLoading: profileLoading } = useGetCallerUserProfile();
 
   useEffect(() => {

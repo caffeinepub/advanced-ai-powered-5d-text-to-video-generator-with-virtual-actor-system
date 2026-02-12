@@ -1,16 +1,30 @@
-import { useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import TextInput from '../components/TextInput';
 import ScenePreview from '../components/ScenePreview';
+import { DEFAULT_SETTINGS, type GenerationSettings } from '../utils/generationSettings';
+import { getGenerationProvider, type GenerationProvider } from '../utils/generationProvider';
 
 export default function CreatePage() {
-  const [inputText, setInputText] = useState('');
+  const [text, setText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
   const [generatedVideoId, setGeneratedVideoId] = useState<string | null>(null);
+  const [settings] = useState<GenerationSettings>(DEFAULT_SETTINGS);
+  const [provider] = useState<GenerationProvider>(getGenerationProvider());
+  const [promptVersion, setPromptVersion] = useState(0);
 
-  const handleGenerate = () => {
+  const handleTextChange = (newText: string) => {
+    setText(newText);
+    // Increment version to signal preview invalidation
+    setPromptVersion((prev) => prev + 1);
+  };
+
+  const handleGenerateFull = () => {
     setIsGenerating(true);
-    setGeneratedVideoId(null);
+  };
+
+  const handleGeneratePreview = () => {
+    setIsPreviewing(true);
   };
 
   const handleGenerationComplete = (videoId: string) => {
@@ -18,48 +32,40 @@ export default function CreatePage() {
     setIsGenerating(false);
   };
 
+  const handlePreviewComplete = () => {
+    setIsPreviewing(false);
+  };
+
   return (
-    <div className="relative min-h-screen">
-      <div className="absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-background to-accent/20" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,oklch(var(--primary)/0.1),transparent_50%)]" />
+    <div className="container mx-auto max-w-6xl space-y-6 px-4 py-8">
+      <div className="space-y-2">
+        <h1 className="text-3xl font-bold tracking-tight">Create Video</h1>
+        <p className="text-muted-foreground">
+          Describe your vision and watch it come to life with AI-powered 3D animation
+        </p>
       </div>
 
-      <div className="container mx-auto px-4 py-12">
-        <div className="mb-12 text-center">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
-            <Sparkles className="h-4 w-4" />
-            AI-Powered 3D Video Generation
-          </div>
-          <h1 className="mb-4 text-5xl font-bold tracking-tight md:text-6xl">
-            Create Your
-            <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
-              {' '}
-              AI Video
-            </span>
-          </h1>
-          <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
-            Describe your video idea and watch AI transform it into a stunning 3D animated experience.
-          </p>
-        </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <TextInput
+          value={text}
+          onChange={handleTextChange}
+          onGenerateFull={handleGenerateFull}
+          onGeneratePreview={handleGeneratePreview}
+          isGenerating={isGenerating}
+          isPreviewing={isPreviewing}
+        />
 
-        <div className="space-y-8">
-          <TextInput
-            value={inputText}
-            onChange={setInputText}
-            onGenerate={handleGenerate}
-            isGenerating={isGenerating}
-          />
-
-          {(inputText || isGenerating || generatedVideoId) && (
-            <ScenePreview
-              text={inputText}
-              isGenerating={isGenerating}
-              onGenerationComplete={handleGenerationComplete}
-              generatedVideoId={generatedVideoId}
-            />
-          )}
-        </div>
+        <ScenePreview
+          text={text}
+          isGenerating={isGenerating}
+          isPreviewing={isPreviewing}
+          onGenerationComplete={handleGenerationComplete}
+          onPreviewComplete={handlePreviewComplete}
+          generatedVideoId={generatedVideoId}
+          settings={settings}
+          provider={provider}
+          shouldInvalidatePreview={promptVersion > 0}
+        />
       </div>
     </div>
   );

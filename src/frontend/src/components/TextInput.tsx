@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Sparkles, Wand2 } from 'lucide-react';
+import { Sparkles, Wand2, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,8 +9,10 @@ import { toast } from 'sonner';
 interface TextInputProps {
   value: string;
   onChange: (value: string) => void;
-  onGenerate: () => void;
+  onGenerateFull: () => void;
+  onGeneratePreview: () => void;
   isGenerating: boolean;
+  isPreviewing: boolean;
 }
 
 const EXAMPLE_PROMPTS = [
@@ -20,11 +22,20 @@ const EXAMPLE_PROMPTS = [
   'A cozy mountain cabin during a snowstorm, warm fireplace glowing inside, peaceful winter atmosphere',
 ];
 
-export default function TextInput({ value, onChange, onGenerate, isGenerating }: TextInputProps) {
+export default function TextInput({ 
+  value, 
+  onChange, 
+  onGenerateFull, 
+  onGeneratePreview,
+  isGenerating,
+  isPreviewing,
+}: TextInputProps) {
   const { identity, login } = useInternetIdentity();
   const [selectedExample, setSelectedExample] = useState<number | null>(null);
 
-  const handleGenerate = () => {
+  const isProcessing = isGenerating || isPreviewing;
+
+  const handleGenerateFull = () => {
     if (!identity) {
       toast.error('Please login to generate videos');
       login();
@@ -41,7 +52,21 @@ export default function TextInput({ value, onChange, onGenerate, isGenerating }:
       return;
     }
 
-    onGenerate();
+    onGenerateFull();
+  };
+
+  const handleGeneratePreview = () => {
+    if (!value.trim()) {
+      toast.error('Please enter a description');
+      return;
+    }
+
+    if (value.trim().length < 20) {
+      toast.error('Please provide a more detailed description (at least 20 characters)');
+      return;
+    }
+
+    onGeneratePreview();
   };
 
   const handleExampleClick = (example: string, index: number) => {
@@ -67,7 +92,7 @@ export default function TextInput({ value, onChange, onGenerate, isGenerating }:
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className="min-h-[150px] resize-none text-base"
-          disabled={isGenerating}
+          disabled={isProcessing}
         />
 
         <div className="space-y-2">
@@ -77,10 +102,10 @@ export default function TextInput({ value, onChange, onGenerate, isGenerating }:
               <button
                 key={index}
                 onClick={() => handleExampleClick(prompt, index)}
-                disabled={isGenerating}
+                disabled={isProcessing}
                 className={`rounded-lg border p-3 text-left text-sm transition-all hover:border-primary hover:bg-accent ${
                   selectedExample === index ? 'border-primary bg-accent' : 'border-border'
-                } ${isGenerating ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                } ${isProcessing ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
               >
                 {prompt}
               </button>
@@ -88,24 +113,46 @@ export default function TextInput({ value, onChange, onGenerate, isGenerating }:
           </div>
         </div>
 
-        <Button
-          onClick={handleGenerate}
-          disabled={isGenerating || !value.trim()}
-          size="lg"
-          className="w-full gap-2"
-        >
-          {isGenerating ? (
-            <>
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              Generating...
-            </>
-          ) : (
-            <>
-              <Sparkles className="h-4 w-4" />
-              Generate 3D Video
-            </>
-          )}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={handleGeneratePreview}
+            disabled={isProcessing || !value.trim()}
+            size="lg"
+            variant="outline"
+            className="flex-1 gap-2"
+          >
+            {isPreviewing ? (
+              <>
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                Previewing...
+              </>
+            ) : (
+              <>
+                <Eye className="h-4 w-4" />
+                Preview sample
+              </>
+            )}
+          </Button>
+
+          <Button
+            onClick={handleGenerateFull}
+            disabled={isProcessing || !value.trim()}
+            size="lg"
+            className="flex-1 gap-2"
+          >
+            {isGenerating ? (
+              <>
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                Generate full clip
+              </>
+            )}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

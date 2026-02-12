@@ -1,84 +1,109 @@
 {
   "kind": "implementation_plan",
   "version": "1.0",
-  "title": "Rules-based emotion detection integrated into Create preview pipeline (frontend-only)",
+  "title": "Add sample preview generation before full clip generation and download",
   "requirements": [
     {
       "id": "REQ-1",
-      "summary": "Add a deterministic, browser-only rules-based classifier that maps scene text to {emotion,intensity,energy,mood} with strict enums and clamped intensity.",
+      "summary": "Add a user-facing \"Preview sample\" action that generates and plays a short preview clip from the current prompt before full generation.",
       "acceptanceCriteria": [
-        "A new frontend utility module exists (e.g., under frontend/src/utils/) that exposes a function to classify a scene text into {emotion,intensity,energy,mood}.",
-        "Classification is fully deterministic and runs entirely in the browser (no network calls).",
-        "Returned values are constrained to the allowed enums and intensity is always clamped to [0.0, 1.0]."
+        "On the Create flow, users can trigger a \"Preview sample\" action that generates a short preview clip (shorter than the configured full duration) from the current prompt.",
+        "After a sample preview completes, the UI plays the sample preview in the existing preview player area.",
+        "The sample preview action is clearly labeled in English (e.g., \"Preview sample\") and is available before running full generation."
       ],
       "file_operations": [
         {
-          "path": "frontend/src/utils/sceneEmotionClassifier.ts",
-          "operation": "create",
-          "description": "Create a deterministic rules-based classifier utility that derives emotion (fear|joy|calm|sadness|anger|surprise|wonder), intensity (clamped 0..1), energy (low|medium|high), and mood (dark|neutral|bright) solely from scene text; ensure no network calls and handle empty/edge-case strings safely."
+          "path": "frontend/src/components/TextInput.tsx",
+          "operation": "modify",
+          "description": "Update the Create-flow prompt input actions to present a clearly labeled \"Preview sample\" button alongside the existing generation CTA. Keep prompt validation consistent; ensure the preview action is available prior to full generation."
+        },
+        {
+          "path": "frontend/src/components/ScenePreview.tsx",
+          "operation": "modify",
+          "description": "Add a sample-preview generation mode that runs the same local rendering/recording pipeline but uses a shorter duration than the configured full duration, then plays the result in the existing preview player area. Use the blob-storage ExternalBlob capability (create ExternalBlob from bytes and render via getBytes()/getDirectURL patterns as appropriate) to manage preview playback data; verify the component's usage instructions before implementing."
+        },
+        {
+          "path": "frontend/src/pages/CreatePage.tsx",
+          "operation": "modify",
+          "description": "Wire the new \"Preview sample\" action into the Create flow by adding state to trigger sample generation and pass the necessary mode/trigger props into ScenePreview so preview generation can be initiated independently of full generation."
         }
       ]
     },
     {
       "id": "REQ-2",
-      "summary": "Replace backend emotion timeline generation in ScenePreview with a frontend-generated EmotionTimeline[] derived from the rules-based classifier, and ensure VirtualActor facial animation responds.",
+      "summary": "Ensure sample preview generation is ephemeral and does not persist to the user's library or call backend create mutations.",
       "acceptanceCriteria": [
-        "frontend/src/components/ScenePreview.tsx no longer depends on the backend useGenerateEmotionTimeline() mutation for emotion generation.",
-        "The preview pipeline produces an EmotionTimeline[] used by <Scene3D ... emotionTimeline={...} /> and the avatar facial animation responds to it via existing VirtualActor logic.",
-        "The emotion timeline generation works for any input text (including short/edge-case strings) without throwing and always produces a valid array (may be a single cue at time 0)."
+        "After generating a sample preview, the user’s Video Library does not show a new item created by the preview.",
+        "No backend \"addVideo\" / \"addAudio\" / \"addBackgroundMusic\" / \"addSceneConfig\" mutations are executed as part of sample preview generation.",
+        "Refreshing the page after only generating a sample preview does not reveal any new saved media artifacts."
       ],
       "file_operations": [
         {
-          "path": "frontend/src/utils/emotionTimeline.ts",
-          "operation": "create",
-          "description": "Create a small utility that converts a single classified emotion result into a deterministic EmotionTimeline[] (always returns a valid array; at minimum one cue at time 0) suitable for driving Scene3D/VirutalActor facial animation."
-        },
-        {
           "path": "frontend/src/components/ScenePreview.tsx",
           "operation": "modify",
-          "description": "Remove dependency on useGenerateEmotionTimeline() and replace the preview pipeline’s emotion generation step with frontend-only classification + EmotionTimeline[] creation; ensure emotionTimeline state is always set to a valid array for any text input."
+          "description": "Refactor generation so the sample-preview path never calls the existing persistence/upload logic (React Query mutations for addVideo/addAudio/addBackgroundMusic/addSceneConfig). Ensure the preview output is handled only in-memory (e.g., object URL / ExternalBlob in component state) and is discarded on refresh. Use the blob-storage ExternalBlob capability only for in-memory handling (no backend saves); verify the component's usage instructions before implementing."
         },
         {
-          "path": "frontend/src/components/VirtualActor.tsx",
+          "path": "frontend/src/components/VideoLibrary.tsx",
           "operation": "modify",
-          "description": "Update/extend the emotion-to-blendshape mapping to support the strict emotion enum set (fear|joy|calm|sadness|anger|surprise|wonder), ensuring timeline cues from the frontend classifier reliably affect facial animation without errors."
+          "description": "Confirm library loading and display behavior remains tied only to persisted videos returned from the backend, and add any necessary client-side safeguards to avoid accidentally displaying sample-preview artifacts (which should not be persisted)."
         }
       ]
     },
     {
       "id": "REQ-3",
-      "summary": "Use detected emotion/energy/mood to deterministically bias duration calculations and at least one generation/render parameter in the Create preview pipeline.",
+      "summary": "Add a distinct \"Generate full clip\" action that preserves the existing full workflow (save to library + download) and retains Internet Identity login gating.",
       "acceptanceCriteria": [
-        "ScenePreview’s duration-related computations are adjusted by an emotion-based duration multiplier mapping: calm×1.3, wonder×1.2, joy×1.1, sadness×1.1, fear×0.8, anger×0.7, surprise×0.6 (default×1.0).",
-        "At least one existing generation step is deterministically influenced by energy and/or mood (e.g., background music synthesis parameters, lighting/fog/environment in Scene3D, or narration duration), and the change is visible/testable by providing different texts (e.g., calm vs fear).",
-        "No backend schema changes are required to support these adjustments."
+        "A distinct \"Generate full clip\" action is available and triggers the existing full pipeline (including upload to the user library).",
+        "After full generation completes, the existing download control works as it does today for the generated full clip.",
+        "Generating a full clip still requires Internet Identity login (same gating behavior as current generation)."
       ],
       "file_operations": [
         {
-          "path": "frontend/src/components/ScenePreview.tsx",
+          "path": "frontend/src/components/TextInput.tsx",
           "operation": "modify",
-          "description": "Incorporate emotion-based duration multiplier mapping into duration-related computations (e.g., narration/music/video durations and related metadata) and deterministically vary at least one generation parameter using energy and/or mood (e.g., music synthesis characteristics and/or narration timing) without requiring any backend changes."
+          "description": "Replace/rename the existing single generation CTA to a distinct \"Generate full clip\" action while keeping the current Internet Identity login gating behavior (trigger login when unauthenticated)."
         },
         {
-          "path": "frontend/src/components/Scene3D.tsx",
+          "path": "frontend/src/components/ScenePreview.tsx",
           "operation": "modify",
-          "description": "Deterministically bias at least one visual parameter (e.g., lighting intensity/color, fog density/color, or Environment preset selection) based on the detected energy and/or mood, wired from the Create preview pipeline so differences are visible when using different scene texts."
+          "description": "Separate sample-preview vs full-generation execution paths: full generation must continue to run the current pipeline including backend persistence and then enable the existing download behavior for the full clip. Ensure the download control is associated with the full-generation result (and not required for sample preview). Use the blob-storage ExternalBlob capability as currently used for recorded video bytes and playback/download; verify the component's usage instructions before implementing."
+        },
+        {
+          "path": "frontend/src/pages/VideoGenerator.tsx",
+          "operation": "modify",
+          "description": "Wire the distinct \"Generate full clip\" action into the tabbed Create flow (VideoGenerator page) so it triggers the existing full pipeline and preserves login gating, independent from the sample-preview action."
         }
       ]
     },
     {
       "id": "REQ-4",
-      "summary": "Persist the rules-based emotion analysis object in the sceneData JSON saved via addSceneConfig alongside existing gestures/emotions timeline fields.",
+      "summary": "Update the Create UI to show both actions with clear in-progress/disabled states and invalidate prior previews when the prompt changes.",
       "acceptanceCriteria": [
-        "When saving a scene config in ScenePreview.saveToBackend(), the sceneData JSON includes the detected emotion analysis object (emotion/intensity/energy/mood) in addition to the existing emotions timeline array.",
-        "The saved JSON remains valid and does not break existing reads (backend continues treating sceneData as opaque Text).",
-        "Generated videos remain savable and viewable in the library after this change."
+        "While a sample preview is generating, both preview and full generation actions are disabled and show an in-progress state consistent with existing UX.",
+        "While a full clip is generating/uploading, both actions are disabled and show an in-progress state consistent with existing UX.",
+        "If the user changes the prompt text after a sample preview, the UI clearly resets/invalidates the old preview playback so it’s obvious it no longer matches the current prompt."
       ],
       "file_operations": [
         {
+          "path": "frontend/src/components/TextInput.tsx",
+          "operation": "modify",
+          "description": "Implement dual-action disabled/in-progress UX: when either sample preview or full generation is in progress, disable both buttons and reflect progress text consistent with the current style (e.g., spinner + label). Ensure prompt textarea/examples remain appropriately disabled when generation is in progress."
+        },
+        {
+          "path": "frontend/src/pages/CreatePage.tsx",
+          "operation": "modify",
+          "description": "Add parent-level state that prevents simultaneous triggers (sample vs full) and resets/invalidates any previous preview playback when the prompt changes (e.g., by resetting the preview trigger/result state passed into ScenePreview)."
+        },
+        {
+          "path": "frontend/src/pages/VideoGenerator.tsx",
+          "operation": "modify",
+          "description": "Mirror the same dual-action state management in the tabbed Create flow so both actions are mutually exclusive during processing, and prompt changes invalidate the existing preview playback/result to avoid mismatch."
+        },
+        {
           "path": "frontend/src/components/ScenePreview.tsx",
           "operation": "modify",
-          "description": "Extend saveToBackend() so the sceneData JSON payload includes the final detected emotion analysis object (emotion/intensity/energy/mood) alongside existing gestures and emotions (timeline) fields, keeping sceneData valid JSON and preserving library save/view behavior."
+          "description": "Support explicit invalidation/reset behavior when the prompt changes after a sample preview (e.g., clear the current playback state and show a \"preview out of date\"/ready state). Ensure generation-in-progress state is surfaced so parent UI can disable both actions."
         }
       ]
     }

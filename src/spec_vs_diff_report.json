@@ -1,53 +1,59 @@
 {
   "kind": "spec_vs_diff_report",
   "version": "1.0",
-  "generatedAt": "2026-02-06T03:10:06.832Z",
-  "summary": "Diff adds a deterministic frontend emotion classifier and utilities to generate an EmotionTimeline from that analysis, then wires the analysis/timeline into the Create preview pipeline (ScenePreview → Scene3D → VirtualActor). It also appears to add deterministic emotion-driven rendering/music/timing hooks, but some acceptance-criteria details (exact duration multiplier mapping and persistence payload shape) are only implied due to truncation.",
+  "generatedAt": "2026-02-12T07:30:10.420Z",
+  "summary": "Diff adds dual actions for sample preview vs full generation in the Create flow (new preview state, new handlers, and TextInput props), plus ScenePreview changes suggesting a dual-mode pipeline with a fixed short preview duration and prompt-change invalidation signaling. Some additional unrelated UI/theme/error-handling enhancements appear in the diff summary.",
   "missing_requirements": [
     {
-      "id": "REQ-3",
-      "requirement": "ScenePreview’s duration-related computations are adjusted by an emotion-based duration multiplier mapping: calm×1.3, wonder×1.2, joy×1.1, sadness×1.1, fear×0.8, anger×0.7, surprise×0.6 (default×1.0).",
-      "reason": "ScenePreview.tsx imports getEmotionDurationMultiplier, but the diff summary does not show the actual mapping implementation or its application to duration computations (file content is truncated before the relevant section).",
+      "id": "REQ-2",
+      "requirement": "Ensure sample preview generation does not persist anything to the user’s library and does not call backend mutations that create Video/Audio/Music/SceneConfig records.",
+      "reason": "ScenePreview.tsx is truncated; while it imports addVideo/addAudio/addBackgroundMusic/addSceneConfig hooks, the diff excerpt does not clearly show that preview mode avoids calling these mutations and avoids persisting artifacts. The provided excerpt alone is insufficient to verify the acceptance criteria.",
       "evidence": [
-        "frontend/src/components/ScenePreview.tsx",
-        "frontend/src/utils/sceneEmotionClassifier.ts (truncated)"
+        "frontend/src/components/ScenePreview.tsx (truncated)"
       ]
     },
     {
-      "id": "REQ-4",
-      "requirement": "When saving a scene config in ScenePreview.saveToBackend(), the sceneData JSON includes the detected emotion analysis object (emotion/intensity/energy/mood) in addition to the existing emotions timeline array.",
-      "reason": "The diff summary claims persistence in a high-level file summary, but the actual saveToBackend() code showing emotionAnalysis included in sceneData JSON is not present in the provided truncated excerpt, so it cannot be verified from concrete diff evidence.",
+      "id": "REQ-3",
+      "requirement": "After full generation completes, the existing download control works as it does today for the generated full clip.",
+      "reason": "Although ScenePreview imports a Download icon/button-related UI, the truncated diff does not show the post-generation download control behavior wired specifically to the full clip output (vs preview). This cannot be confirmed from the provided excerpt.",
       "evidence": [
-        "frontend/src/components/ScenePreview.tsx (truncated)",
-        "frontend-file-summaries.txt"
+        "frontend/src/components/ScenePreview.tsx (truncated)"
       ]
     }
   ],
   "hallucinated_features": [
     {
-      "description": "Frontend gesture cue generation based on emotion/energy (generateGestureCues) and likely integration into preview.",
-      "reason": "The BuildRequest focuses on emotion detection/timeline and saving emotion analysis; it does not request adding a new rules-based gesture generation system.",
+      "description": "Enhanced Video Library loading/error handling and retry behavior (beyond preview-vs-full generation feature).",
+      "reason": "Not requested by the BuildRequest; requirements focus on Create flow preview/full actions and persistence behavior, not library UI improvements.",
       "evidence": [
-        "frontend/src/utils/emotionTimeline.ts",
-        "frontend/src/components/ScenePreview.tsx (imports generateGestureCues)"
+        "frontend/src/components/VideoLibrary.tsx (truncated)"
       ]
     },
     {
-      "description": "Expanded emotion-to-blendshape mapping includes synonyms (happy/sad/angry) beyond the specified emotion enum.",
-      "reason": "REQ-1 specifies a strict emotion enum output; adding extra mapping keys is not requested (though it may be harmless for compatibility).",
+      "description": "Global styling/theme updates (OKLCH color system, Tailwind palette/animations) unrelated to preview generation.",
+      "reason": "Not requested; BuildRequest is specific to adding preview generation before full generation.",
       "evidence": [
-        "frontend/src/components/VirtualActor.tsx"
+        "frontend-file-summaries.txt (truncated) -> frontend/src/index.css",
+        "frontend-file-summaries.txt (truncated) -> frontend/tailwind.config.js"
+      ]
+    },
+    {
+      "description": "3D/virtual actor system enhancements (Scene3D style preset support, VirtualActor extended emotion mapping) beyond preview/full workflow changes.",
+      "reason": "Not requested by the BuildRequest; appears to be additional feature work unrelated to sample preview generation UX.",
+      "evidence": [
+        "frontend-file-summaries.txt (truncated) -> frontend/src/components/Scene3D.tsx",
+        "frontend-file-summaries.txt (truncated) -> frontend/src/components/VirtualActor.tsx"
       ]
     }
   ],
-  "confidence": 0.64,
+  "confidence": 0.63,
   "changed_files": [
     "frontend-file-summaries.txt",
-    "frontend/src/components/Scene3D.tsx",
     "frontend/src/components/ScenePreview.tsx",
-    "frontend/src/components/VirtualActor.tsx",
-    "frontend/src/utils/emotionTimeline.ts",
-    "frontend/src/utils/sceneEmotionClassifier.ts",
+    "frontend/src/components/TextInput.tsx",
+    "frontend/src/components/VideoLibrary.tsx",
+    "frontend/src/pages/CreatePage.tsx",
+    "frontend/src/pages/VideoGenerator.tsx",
     "project_state.json"
   ]
 }

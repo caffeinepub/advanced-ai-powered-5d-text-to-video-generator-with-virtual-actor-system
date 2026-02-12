@@ -10,13 +10,18 @@ import Principal "mo:core/Principal";
 import AccessControl "authorization/access-control";
 import Storage "blob-storage/Storage";
 import MixinStorage "blob-storage/Mixin";
+
+
 import MixinAuthorization "authorization/MixinAuthorization";
 
+// Migrate state on actor re-install.
+
 actor {
-  // Include role-based access control using prefabricated user system
+  // Include new User system based authorization system
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
 
+  // Storage system
   include MixinStorage();
 
   // User Profile System
@@ -28,9 +33,6 @@ actor {
   let userProfiles = Map.empty<Principal, UserProfile>();
 
   public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can access profiles");
-    };
     userProfiles.get(caller);
   };
 
@@ -46,6 +48,12 @@ actor {
       Runtime.trap("Unauthorized: Only users can save profiles");
     };
     userProfiles.add(caller, profile);
+  };
+
+  private func assertCreatorOrAdmin(createdBy : Principal, caller : Principal) {
+    if (createdBy != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Only the creator or admin can modify this");
+    };
   };
 
   type VideoId = Text;
@@ -257,14 +265,12 @@ actor {
 
   public shared ({ caller }) func updateVideoMetadata(id : VideoId, newMetadata : VideoMetadata) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can update videos");
+      Runtime.trap("Unauthorized: Only users can update video metadata");
     };
     switch (videoMap.get(id)) {
       case (null) { Runtime.trap("Video not found") };
       case (?video) {
-        if (video.metadata.createdBy != caller and not AccessControl.isAdmin(accessControlState, caller)) {
-          Runtime.trap("Unauthorized: Only the creator or admin can update this video");
-        };
+        assertCreatorOrAdmin(video.metadata.createdBy, caller);
         let updatedVideo = {
           videoBlob = video.videoBlob;
           metadata = newMetadata;
@@ -276,14 +282,12 @@ actor {
 
   public shared ({ caller }) func updateAudioMetadata(id : AudioId, newMetadata : AudioMetadata) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can update audio");
+      Runtime.trap("Unauthorized: Only users can update audio metadata");
     };
     switch (audioMap.get(id)) {
       case (null) { Runtime.trap("Audio not found") };
       case (?audio) {
-        if (audio.metadata.createdBy != caller and not AccessControl.isAdmin(accessControlState, caller)) {
-          Runtime.trap("Unauthorized: Only the creator or admin can update this audio");
-        };
+        assertCreatorOrAdmin(audio.metadata.createdBy, caller);
         let updatedAudio = {
           audioBlob = audio.audioBlob;
           metadata = newMetadata;
@@ -295,14 +299,12 @@ actor {
 
   public shared ({ caller }) func updateMusicMetadata(id : MusicId, newMetadata : BackgroundMusicMetadata) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can update music");
+      Runtime.trap("Unauthorized: Only users can update music metadata");
     };
     switch (musicMap.get(id)) {
       case (null) { Runtime.trap("Music not found") };
       case (?music) {
-        if (music.metadata.createdBy != caller and not AccessControl.isAdmin(accessControlState, caller)) {
-          Runtime.trap("Unauthorized: Only the creator or admin can update this music");
-        };
+        assertCreatorOrAdmin(music.metadata.createdBy, caller);
         let updatedMusic = {
           musicBlob = music.musicBlob;
           metadata = newMetadata;
@@ -319,16 +321,13 @@ actor {
     switch (sceneConfigMap.get(id)) {
       case (null) { Runtime.trap("Scene config not found") };
       case (?config) {
-        if (config.createdBy != caller and not AccessControl.isAdmin(accessControlState, caller)) {
-          Runtime.trap("Unauthorized: Only the creator or admin can update this scene config");
-        };
+        assertCreatorOrAdmin(config.createdBy, caller);
         sceneConfigMap.add(id, newConfig);
       };
     };
   };
 
   public query ({ caller }) func getVideo(id : VideoId) : async Video {
-    // Public read access - no authorization check needed
     switch (videoMap.get(id)) {
       case (null) { Runtime.trap("Video not found") };
       case (?video) { video };
@@ -336,7 +335,6 @@ actor {
   };
 
   public query ({ caller }) func getAudio(id : AudioId) : async Audio {
-    // Public read access - no authorization check needed
     switch (audioMap.get(id)) {
       case (null) { Runtime.trap("Audio not found") };
       case (?audio) { audio };
@@ -344,7 +342,6 @@ actor {
   };
 
   public query ({ caller }) func getBackgroundMusic(id : MusicId) : async BackgroundMusic {
-    // Public read access - no authorization check needed
     switch (musicMap.get(id)) {
       case (null) { Runtime.trap("Music not found") };
       case (?music) { music };
@@ -352,7 +349,6 @@ actor {
   };
 
   public query ({ caller }) func getSceneConfig(id : SceneConfigId) : async SceneConfig {
-    // Public read access - no authorization check needed
     switch (sceneConfigMap.get(id)) {
       case (null) { Runtime.trap("Scene config not found") };
       case (?config) { config };
@@ -360,51 +356,41 @@ actor {
   };
 
   public query ({ caller }) func getVideosByCreator(creator : Principal) : async [Video] {
-    // Public read access - no authorization check needed
     videoList.toArray().filter(func(video) { video.metadata.createdBy == creator });
   };
 
   public query ({ caller }) func getAudioByCreator(creator : Principal) : async [Audio] {
-    // Public read access - no authorization check needed
     audioList.toArray().filter(func(audio) { audio.metadata.createdBy == creator });
   };
 
   public query ({ caller }) func getMusicByCreator(creator : Principal) : async [BackgroundMusic] {
-    // Public read access - no authorization check needed
     musicList.toArray().filter(func(music) { music.metadata.createdBy == creator });
   };
 
   public query ({ caller }) func getSceneConfigsByCreator(creator : Principal) : async [SceneConfig] {
-    // Public read access - no authorization check needed
     sceneConfigList.toArray().filter(func(config) { config.createdBy == creator });
   };
 
   public query ({ caller }) func getAllVideosSorted() : async [Video] {
-    // Public read access - no authorization check needed
     videoList.toArray().sort();
   };
 
   public query ({ caller }) func getAllAudioSorted() : async [Audio] {
-    // Public read access - no authorization check needed
     audioList.toArray().sort();
   };
 
   public query ({ caller }) func getAllMusicSorted() : async [BackgroundMusic] {
-    // Public read access - no authorization check needed
     musicList.toArray().sort();
   };
 
   public query ({ caller }) func getAllSceneConfigsSorted() : async [SceneConfig] {
-    // Public read access - no authorization check needed
     sceneConfigList.toArray().sort();
   };
 
   public query ({ caller }) func findVideosByTitle(title : Text) : async [Video] {
-    // Public read access - no authorization check needed
     videoList.toArray().filter(func(video) { video.metadata.title.contains(#text title) });
   };
 
-  // New types
   type Gesture = {
     id : GestureId;
     name : Text;
@@ -471,21 +457,17 @@ actor {
     switch (virtualActorSystem.gestureLibrary.get(id)) {
       case (null) { Runtime.trap("Gesture not found") };
       case (?gesture) {
-        if (gesture.createdBy != caller and not AccessControl.isAdmin(accessControlState, caller)) {
-          Runtime.trap("Unauthorized: Only the creator or admin can update this gesture");
-        };
+        assertCreatorOrAdmin(gesture.createdBy, caller);
         virtualActorSystem.gestureLibrary.add(id, updatedGesture);
       };
     };
   };
 
   public query ({ caller }) func getGesture(id : GestureId) : async ?Gesture {
-    // Public read access - no authorization check needed
     virtualActorSystem.gestureLibrary.get(id);
   };
 
   public query ({ caller }) func getAllGestures() : async [Gesture] {
-    // Public read access - no authorization check needed
     let gestureIter = virtualActorSystem.gestureLibrary.values();
     gestureIter.toArray();
   };
@@ -510,21 +492,17 @@ actor {
     switch (virtualActorSystem.emotionLibrary.get(id)) {
       case (null) { Runtime.trap("Emotion not found") };
       case (?emotion) {
-        if (emotion.createdBy != caller and not AccessControl.isAdmin(accessControlState, caller)) {
-          Runtime.trap("Unauthorized: Only the creator or admin can update this emotion");
-        };
+        assertCreatorOrAdmin(emotion.createdBy, caller);
         virtualActorSystem.emotionLibrary.add(id, updatedEmotion);
       };
     };
   };
 
   public query ({ caller }) func getEmotion(id : EmotionId) : async ?Emotion {
-    // Public read access - no authorization check needed
     virtualActorSystem.emotionLibrary.get(id);
   };
 
   public query ({ caller }) func getAllEmotions() : async [Emotion] {
-    // Public read access - no authorization check needed
     let emotionIter = virtualActorSystem.emotionLibrary.values();
     emotionIter.toArray();
   };
@@ -562,12 +540,10 @@ actor {
   };
 
   public query ({ caller }) func getAvatar(id : AvatarId) : async ?Avatar {
-    // Public read access - no authorization check needed
     virtualActorSystem.avatarLibrary.get(id);
   };
 
   public query ({ caller }) func getAllAvatars() : async [Avatar] {
-    // Public read access - no authorization check needed
     let avatarIter = virtualActorSystem.avatarLibrary.values();
     avatarIter.toArray();
   };
@@ -579,9 +555,7 @@ actor {
     switch (virtualActorSystem.avatarLibrary.get(id)) {
       case (null) { Runtime.trap("Avatar not found") };
       case (?avatar) {
-        if (avatar.avatarMetadata.createdBy != caller and not AccessControl.isAdmin(accessControlState, caller)) {
-          Runtime.trap("Unauthorized: Only the creator or admin can delete this avatar");
-        };
+        assertCreatorOrAdmin(avatar.avatarMetadata.createdBy, caller);
         virtualActorSystem.avatarLibrary.remove(id);
       };
     };
@@ -613,7 +587,6 @@ actor {
   };
 
   public query ({ caller }) func getGestureAnimation(gestureId : GestureId) : async Storage.ExternalBlob {
-    // Public read access - no authorization check needed
     switch (virtualActorSystem.gestureLibrary.get(gestureId)) {
       case (null) {
         Runtime.trap("Gesture not found");
@@ -623,14 +596,12 @@ actor {
   };
 
   public query ({ caller }) func getAvailableGestures() : async [Text] {
-    // Public read access - no authorization check needed
     let gestureIter = virtualActorSystem.gestureLibrary.values();
     let gestureArray = gestureIter.toArray();
     gestureArray.map(func(gesture) { gesture.name });
   };
 
   public query ({ caller }) func getAvailableEmotions() : async [Text] {
-    // Public read access - no authorization check needed
     let emotionIter = virtualActorSystem.emotionLibrary.values();
     let emotionArray = emotionIter.toArray();
     emotionArray.map(func(emotion) { emotion.name });

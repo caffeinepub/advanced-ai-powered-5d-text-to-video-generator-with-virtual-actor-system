@@ -1,273 +1,173 @@
-import { useEffect, useRef, useMemo, useState } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Stars, Float, Environment, PerspectiveCamera } from '@react-three/drei';
+import { useRef, useEffect, forwardRef, useImperativeHandle, useState } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 import VirtualActor from './VirtualActor';
 import { GestureCue, EmotionTimeline } from '../backend';
-import { EmotionAnalysis, getEmotionVisualModifiers } from '../utils/sceneEmotionClassifier';
+import { GenerationSettings } from '../utils/generationSettings';
+
+export interface Scene3DHandle {
+  getCanvas: () => HTMLCanvasElement | null;
+}
 
 interface Scene3DProps {
   text: string;
-  isPlaying: boolean;
-  isMuted: boolean;
+  gestureCues: GestureCue[];
+  emotionTimeline: EmotionTimeline[];
   avatarUrl?: string;
-  gestureCues?: GestureCue[];
-  emotionTimeline?: EmotionTimeline[];
-  emotionAnalysis?: EmotionAnalysis | null;
+  onCanvasReady?: (canvas: HTMLCanvasElement) => void;
+  settings?: GenerationSettings;
 }
 
-function AnalyzeText(text: string) {
-  const lower = text.toLowerCase();
-  
-  return {
-    hasForest: /forest|tree|wood|nature/i.test(text),
-    hasCity: /city|urban|building|skyscraper/i.test(text),
-    hasOcean: /ocean|sea|water|underwater|coral/i.test(text),
-    hasMountain: /mountain|peak|snow|cabin/i.test(text),
-    isNight: /night|dark|evening|dusk/i.test(text),
-    isDawn: /dawn|sunrise|morning/i.test(text),
-    isCalm: /calm|peaceful|serene|gentle/i.test(text),
-    isEnergetic: /energetic|vibrant|dynamic|exciting/i.test(text),
-    hasParticles: /particle|dust|mist|fog|glow/i.test(text),
-    hasLight: /light|glow|shine|bright|ray/i.test(text),
-  };
-}
-
-function AnimatedSphere({ position, color, scale = 1 }: any) {
-  const meshRef = useRef<THREE.Mesh>(null);
-
-  useFrame((state) => {
-    if (meshRef.current) {
-      meshRef.current.position.y = position[1] + Math.sin(state.clock.elapsedTime) * 0.2;
-      meshRef.current.rotation.x += 0.01;
-      meshRef.current.rotation.y += 0.01;
-    }
-  });
-
-  return (
-    <Float speed={2} rotationIntensity={0.5} floatIntensity={0.5}>
-      <mesh ref={meshRef} position={position} scale={scale}>
-        <sphereGeometry args={[1, 32, 32]} />
-        <meshStandardMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={0.5}
-          metalness={0.8}
-          roughness={0.2}
-        />
-      </mesh>
-    </Float>
-  );
-}
-
-function Particles({ count = 100, analysis }: any) {
-  const points = useRef<THREE.Points>(null);
-
-  const particlesGeometry = useMemo(() => {
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(count * 3);
-    
-    for (let i = 0; i < count; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 20;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * 20;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 20;
-    }
-    
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    return geometry;
-  }, [count]);
-
-  useFrame((state) => {
-    if (points.current) {
-      points.current.rotation.y = state.clock.elapsedTime * 0.05;
-    }
-  });
-
-  return (
-    <points ref={points} geometry={particlesGeometry}>
-      <pointsMaterial
-        size={0.1}
-        color={analysis.hasOcean ? '#00ffff' : analysis.hasForest ? '#00ff00' : '#ffffff'}
-        transparent
-        opacity={0.6}
-        sizeAttenuation
-      />
-    </points>
-  );
-}
-
-function Ground({ analysis }: any) {
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2, 0]} receiveShadow>
-      <planeGeometry args={[50, 50]} />
-      <meshStandardMaterial
-        color={analysis.hasOcean ? '#1e40af' : analysis.hasForest ? '#166534' : '#374151'}
-        metalness={analysis.hasOcean ? 0.8 : 0.2}
-        roughness={analysis.hasOcean ? 0.2 : 0.8}
-      />
-    </mesh>
-  );
-}
-
-function SceneContent({ 
-  text, 
-  isPlaying, 
-  avatarUrl, 
-  gestureCues = [], 
-  emotionTimeline = [],
-  emotionAnalysis
-}: { 
-  text: string; 
-  isPlaying: boolean;
-  avatarUrl?: string;
-  gestureCues?: GestureCue[];
-  emotionTimeline?: EmotionTimeline[];
-  emotionAnalysis?: EmotionAnalysis | null;
-}) {
+function SceneContent({
+  text,
+  gestureCues,
+  emotionTimeline,
+  avatarUrl,
+  settings,
+}: Omit<Scene3DProps, 'onCanvasReady'>) {
+  const { scene, camera, gl } = useThree();
+  const lightRef = useRef<THREE.PointLight>(null);
+  const ambientLightRef = useRef<THREE.AmbientLight>(null);
   const [currentTime, setCurrentTime] = useState(0);
-  const analysis = useMemo(() => AnalyzeText(text), [text]);
+  const [isPlaying, setIsPlaying] = useState(true);
+
+  useEffect(() => {
+    // Apply style preset to scene
+    if (settings?.stylePreset) {
+      switch (settings.stylePreset) {
+        case 'cinematic':
+          scene.fog = new THREE.Fog(0x1a1a2e, 5, 15);
+          if (ambientLightRef.current) ambientLightRef.current.intensity = 0.3;
+          break;
+        case 'vibrant':
+          scene.fog = null;
+          if (ambientLightRef.current) ambientLightRef.current.intensity = 0.8;
+          break;
+        case 'minimal':
+          scene.fog = null;
+          scene.background = new THREE.Color(0xf5f5f5);
+          if (ambientLightRef.current) ambientLightRef.current.intensity = 0.6;
+          break;
+        case 'dramatic':
+          scene.fog = new THREE.Fog(0x000000, 3, 10);
+          if (ambientLightRef.current) ambientLightRef.current.intensity = 0.2;
+          break;
+        case 'natural':
+        default:
+          scene.fog = null;
+          if (ambientLightRef.current) ambientLightRef.current.intensity = 0.5;
+          break;
+      }
+    }
+  }, [settings?.stylePreset, scene]);
 
   useFrame((state, delta) => {
-    if (isPlaying) {
-      setCurrentTime((prev) => prev + delta);
+    const time = state.clock.getElapsedTime();
+    
+    // Update current time for virtual actor
+    setCurrentTime(time);
+    
+    if (lightRef.current) {
+      lightRef.current.position.x = Math.sin(time * 0.5) * 3;
+      lightRef.current.position.z = Math.cos(time * 0.5) * 3;
     }
   });
 
-  // Apply emotion-based visual modifiers
-  const visualModifiers = emotionAnalysis 
-    ? getEmotionVisualModifiers(emotionAnalysis.emotion, emotionAnalysis.mood)
-    : null;
-
-  const baseLightIntensity = analysis.isNight ? 0.5 : analysis.isDawn ? 0.8 : 1.0;
-  const emotionLightingMultiplier = visualModifiers?.emotion.lighting || 1.0;
-  const moodLightingBoost = visualModifiers?.mood.lightingBoost || 1.0;
-  const finalLightIntensity = baseLightIntensity * emotionLightingMultiplier * moodLightingBoost;
-
-  const lightColor = analysis.isNight
-    ? '#4169e1'
-    : analysis.isDawn
-    ? '#ff6b35'
-    : '#ffffff';
-
-  const sphereColor = analysis.hasOcean
-    ? '#00ffff'
-    : analysis.hasForest
-    ? '#00ff00'
-    : analysis.hasCity
-    ? '#ff00ff'
-    : '#ffaa00';
-
-  // Emotion-based environment preset
-  const environmentPreset = emotionAnalysis?.mood === 'dark' 
-    ? 'night' 
-    : emotionAnalysis?.mood === 'bright' 
-    ? 'sunset' 
-    : analysis.isNight 
-    ? 'night' 
-    : 'sunset';
-
-  // Fog color and density based on emotion
-  const fogColor = emotionAnalysis?.mood === 'dark' 
-    ? '#000033' 
-    : emotionAnalysis?.mood === 'bright' 
-    ? '#87ceeb' 
-    : analysis.isNight 
-    ? '#000033' 
-    : '#87ceeb';
-
-  const fogDensityMultiplier = visualModifiers?.mood.fogDensity || 1.0;
+  const getEmotionColor = () => {
+    if (emotionTimeline.length === 0) return '#7042f8';
+    
+    const currentEmotion = emotionTimeline[0].emotion;
+    const emotionColors: Record<string, string> = {
+      fear: '#8b5cf6',
+      joy: '#fbbf24',
+      calm: '#60a5fa',
+      sadness: '#6366f1',
+      anger: '#ef4444',
+      surprise: '#f59e0b',
+      wonder: '#a78bfa',
+    };
+    
+    return emotionColors[currentEmotion] || '#7042f8';
+  };
 
   return (
     <>
-      <PerspectiveCamera makeDefault position={[0, 2, 10]} />
+      <PerspectiveCamera makeDefault position={[0, 1.6, 5]} fov={50} />
       <OrbitControls
         enableZoom={true}
-        enablePan={true}
-        autoRotate={isPlaying}
-        autoRotateSpeed={0.5}
+        enablePan={false}
+        minDistance={3}
+        maxDistance={10}
+        maxPolarAngle={Math.PI / 2}
       />
 
-      {/* Lighting with emotion-based intensity */}
-      <ambientLight intensity={0.3 * emotionLightingMultiplier} />
-      <directionalLight
-        position={[10, 10, 5]}
-        intensity={finalLightIntensity}
-        color={lightColor}
+      <ambientLight ref={ambientLightRef} intensity={0.5} />
+      <pointLight
+        ref={lightRef}
+        position={[2, 3, 2]}
+        intensity={1.5}
+        color={getEmotionColor()}
         castShadow
       />
-      <pointLight 
-        position={[-10, 10, -5]} 
-        intensity={0.5 * emotionLightingMultiplier} 
-        color={lightColor} 
-      />
-      <spotLight
-        position={[0, 15, 0]}
-        angle={0.3}
-        penumbra={1}
-        intensity={0.5 * emotionLightingMultiplier}
-        castShadow
-      />
+      <directionalLight position={[-2, 2, 2]} intensity={0.5} />
 
-      {/* Environment with emotion-based preset */}
-      <Environment preset={environmentPreset as any} />
-      <Stars
-        radius={100}
-        depth={50}
-        count={5000}
-        factor={4}
-        saturation={0}
-        fade
-        speed={1}
-      />
+      {avatarUrl ? (
+        <VirtualActor
+          avatarUrl={avatarUrl}
+          gestureCues={gestureCues}
+          emotionTimeline={emotionTimeline}
+          currentTime={currentTime}
+          isPlaying={isPlaying}
+        />
+      ) : (
+        <mesh position={[0, 1, 0]} castShadow>
+          <boxGeometry args={[1, 2, 1]} />
+          <meshStandardMaterial color={getEmotionColor()} />
+        </mesh>
+      )}
 
-      {/* Ground */}
-      <Ground analysis={analysis} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+        <planeGeometry args={[20, 20]} />
+        <meshStandardMaterial color="#1a1a2e" />
+      </mesh>
 
-      {/* Virtual Actor */}
-      <VirtualActor
-        avatarUrl={avatarUrl}
-        gestureCues={gestureCues}
-        emotionTimeline={emotionTimeline}
-        currentTime={currentTime}
-        isPlaying={isPlaying}
-      />
-
-      {/* Animated Objects */}
-      <AnimatedSphere position={[-4, 2, -2]} color={sphereColor} scale={1.5} />
-      <AnimatedSphere position={[-6, 1, -2]} color="#ff6b9d" scale={0.8} />
-      <AnimatedSphere position={[4, 1.5, -2]} color="#4ecdc4" scale={1} />
-      <AnimatedSphere position={[0, 3, -5]} color="#ffe66d" scale={0.6} />
-
-      {/* Particles */}
-      {analysis.hasParticles && <Particles count={200} analysis={analysis} />}
-
-      {/* Fog with emotion-based density */}
-      <fog attach="fog" args={[fogColor, 10 * fogDensityMultiplier, 50 * fogDensityMultiplier]} />
+      <gridHelper args={[20, 20, '#444', '#222']} position={[0, 0.01, 0]} />
     </>
   );
 }
 
-export default function Scene3D({ 
-  text, 
-  isPlaying, 
-  isMuted, 
-  avatarUrl, 
-  gestureCues, 
-  emotionTimeline,
-  emotionAnalysis
-}: Scene3DProps) {
-  return (
-    <div className="h-full w-full">
-      <Canvas shadows>
-        <SceneContent 
-          text={text} 
-          isPlaying={isPlaying} 
-          avatarUrl={avatarUrl}
+const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(
+  ({ text, gestureCues, emotionTimeline, avatarUrl, onCanvasReady, settings }, ref) => {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+    useImperativeHandle(ref, () => ({
+      getCanvas: () => canvasRef.current,
+    }));
+
+    return (
+      <Canvas
+        shadows
+        gl={{ preserveDrawingBuffer: true }}
+        onCreated={({ gl }) => {
+          canvasRef.current = gl.domElement;
+          if (onCanvasReady) {
+            onCanvasReady(gl.domElement);
+          }
+        }}
+      >
+        <SceneContent
+          text={text}
           gestureCues={gestureCues}
           emotionTimeline={emotionTimeline}
-          emotionAnalysis={emotionAnalysis}
+          avatarUrl={avatarUrl}
+          settings={settings}
         />
       </Canvas>
-    </div>
-  );
-}
+    );
+  }
+);
+
+Scene3D.displayName = 'Scene3D';
+
+export default Scene3D;

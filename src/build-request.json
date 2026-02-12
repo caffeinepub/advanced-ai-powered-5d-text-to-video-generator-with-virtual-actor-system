@@ -1,90 +1,89 @@
 {
   "kind": "build_request",
-  "title": "Integrate rules-based scene emotion detection into Create flow (frontend)",
+  "title": "Add sample preview generation before full clip generation and download",
   "priority": "normal",
   "requirements": [
     {
       "id": "REQ-1",
-      "text": "Implement a deterministic, rules-based emotion classifier in the frontend that outputs the strict schema: emotion (fear|joy|calm|sadness|anger|surprise|wonder), intensity (0.0–1.0), energy (low|medium|high), and mood (dark|neutral|bright), derived solely from the user’s scene text (no external LLM/API calls).",
+      "text": "Add a user-facing option to generate and watch a short \"sample preview\" from the current prompt before running the existing full clip generation workflow.",
       "target": "frontend",
       "source": {
         "messageIds": [
-          "msg-user-last"
+          "msg-4"
         ],
         "quotes": [
-          "proceed with integrating the rules‑based emotion"
+          "I want to add an option for users to preview sample outputs before generating a full clip and download"
         ]
       },
       "acceptanceCriteria": [
-        "A new frontend utility module exists (e.g., under frontend/src/utils/) that exposes a function to classify a scene text into {emotion,intensity,energy,mood}.",
-        "Classification is fully deterministic and runs entirely in the browser (no network calls).",
-        "Returned values are constrained to the allowed enums and intensity is always clamped to [0.0, 1.0]."
+        "On the Create flow, users can trigger a \"Preview sample\" action that generates a short preview clip (shorter than the configured full duration) from the current prompt.",
+        "After a sample preview completes, the UI plays the sample preview in the existing preview player area.",
+        "The sample preview action is clearly labeled in English (e.g., \"Preview sample\") and is available before running full generation."
       ]
     },
     {
       "id": "REQ-2",
-      "text": "Integrate the rules-based emotion classifier into the Create flow by replacing the current backend emotion-timeline generation call in the preview pipeline with a frontend-generated emotion timeline suitable for driving the virtual actor facial animation.",
+      "text": "Ensure sample preview generation does not persist anything to the user’s library and does not call backend mutations that create Video/Audio/Music/SceneConfig records.",
       "target": "frontend",
       "source": {
         "messageIds": [
-          "msg-user-last"
+          "msg-4"
         ],
         "quotes": [
-          "proceed with integrating the rules‑based emotion"
+          "preview sample outputs before generating a full clip"
         ]
       },
       "acceptanceCriteria": [
-        "frontend/src/components/ScenePreview.tsx no longer depends on the backend useGenerateEmotionTimeline() mutation for emotion generation.",
-        "The preview pipeline produces an EmotionTimeline[] used by <Scene3D ... emotionTimeline={...} /> and the avatar facial animation responds to it via existing VirtualActor logic.",
-        "The emotion timeline generation works for any input text (including short/edge-case strings) without throwing and always produces a valid array (may be a single cue at time 0)."
+        "After generating a sample preview, the user’s Video Library does not show a new item created by the preview.",
+        "No backend \"addVideo\" / \"addAudio\" / \"addBackgroundMusic\" / \"addSceneConfig\" mutations are executed as part of sample preview generation.",
+        "Refreshing the page after only generating a sample preview does not reveal any new saved media artifacts."
       ]
     },
     {
       "id": "REQ-3",
-      "text": "Use the detected emotion outputs (emotion, intensity, energy, mood) to bias scene timing and generation parameters in the Create pipeline: apply an emotion duration multiplier to computed durations, and use energy/mood to influence music/narration and/or scene rendering parameters in a deterministic way.",
+      "text": "Update the full generation flow so that users can explicitly choose to run \"Generate full clip\" after previewing, and keep the existing full workflow behavior (including saving to library and enabling download).",
       "target": "frontend",
       "source": {
         "messageIds": [
-          "msg-user-last"
+          "msg-4"
         ],
         "quotes": [
-          "proceed with integrating the rules‑based emotion"
+          "before generating a full clip and download"
         ]
       },
       "acceptanceCriteria": [
-        "ScenePreview’s duration-related computations are adjusted by an emotion-based duration multiplier mapping: calm×1.3, wonder×1.2, joy×1.1, sadness×1.1, fear×0.8, anger×0.7, surprise×0.6 (default×1.0).",
-        "At least one existing generation step is deterministically influenced by energy and/or mood (e.g., background music synthesis parameters, lighting/fog/environment in Scene3D, or narration duration), and the change is visible/testable by providing different texts (e.g., calm vs fear).",
-        "No backend schema changes are required to support these adjustments."
+        "A distinct \"Generate full clip\" action is available and triggers the existing full pipeline (including upload to the user library).",
+        "After full generation completes, the existing download control works as it does today for the generated full clip.",
+        "Generating a full clip still requires Internet Identity login (same gating behavior as current generation)."
       ]
     },
     {
       "id": "REQ-4",
-      "text": "Persist the rules-based emotion analysis as part of the saved scene configuration JSON payload stored via addSceneConfig, alongside the existing gestures/emotions fields, so the backend receives the final emotion-annotated scene object data.",
+      "text": "Adjust the Create UI to present both actions (sample preview and full generation) with clear states/disabled behavior while generation is in progress (e.g., prevent triggering both simultaneously).",
       "target": "frontend",
       "source": {
         "messageIds": [
-          "msg-user-last"
+          "msg-4"
         ],
         "quotes": [
-          "proceed with integrating the rules‑based emotion"
+          "add an option for users to preview sample outputs before generating a full clip"
         ]
       },
       "acceptanceCriteria": [
-        "When saving a scene config in ScenePreview.saveToBackend(), the sceneData JSON includes the detected emotion analysis object (emotion/intensity/energy/mood) in addition to the existing emotions timeline array.",
-        "The saved JSON remains valid and does not break existing reads (backend continues treating sceneData as opaque Text).",
-        "Generated videos remain savable and viewable in the library after this change."
+        "While a sample preview is generating, both preview and full generation actions are disabled and show an in-progress state consistent with existing UX.",
+        "While a full clip is generating/uploading, both actions are disabled and show an in-progress state consistent with existing UX.",
+        "If the user changes the prompt text after a sample preview, the UI clearly resets/invalidates the old preview playback so it’s obvious it no longer matches the current prompt."
       ]
     }
   ],
   "constraints": [
-    "Do not call OpenAI or any external LLM service from the Internet Computer app (frontend or backend).",
-    "Keep all backend logic in the existing single Motoko actor (backend/main.mo); do not introduce additional backend services.",
-    "Do not edit files under frontend/src/components/ui or any paths listed as immutable in SYSTEM_CONTEXT."
+    "Do not edit files in frontend/immutablePaths (e.g., frontend/src/hooks/useInternetIdentity.ts(x), frontend/src/hooks/useActor.ts, frontend/src/main.tsx, frontend/src/components/ui).",
+    "Keep backend architecture as a single Motoko actor in backend/main.mo; add backend changes only if strictly necessary for this feature."
   ],
   "nonGoals": [
-    "Implementing true LLM-based emotion detection.",
-    "Adding new backend endpoints or changing the Motoko EmotionTimeline type/schema.",
-    "Building a multi-scene sentence splitter or full AI job orchestration/queue system beyond integrating rules-based emotion into the current Create preview pipeline."
+    "Implementing third-party AI/video generation integrations or external APIs for sample generation.",
+    "Adding new authentication methods beyond Internet Identity.",
+    "Adding real-time streaming previews (e.g., WebSockets) or live rendering over the network."
   ],
   "imageRequirements": {
     "required": [],

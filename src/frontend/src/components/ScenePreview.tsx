@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Download, Play, Pause, Volume2, VolumeX, RefreshCw } from 'lucide-react';
+import { Download, Play, Pause, Volume2, VolumeX, RefreshCw, Loader2, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import Scene3D from './Scene3D';
+import Scene3D, { Scene3DHandle } from './Scene3D';
 import { useInternetIdentity } from '../hooks/useInternetIdentity';
 import {
   useAddVideo,
@@ -23,48 +23,81 @@ import {
   type EmotionAnalysis 
 } from '../utils/sceneEmotionClassifier';
 import { generateEmotionTimeline, generateGestureCues } from '../utils/emotionTimeline';
+import { GENERATION_PROVIDERS, type GenerationProvider, isProviderAvailable } from '../utils/generationProvider';
+import { recordCanvas, isMediaRecorderSupported, getRecordingErrorMessage } from '../utils/mediaRecorder';
+import { normalizeGenerationError } from '../utils/generationErrors';
+import { GenerationSettings, getResolutionForAspectRatio } from '../utils/generationSettings';
 
 interface ScenePreviewProps {
   text: string;
   isGenerating: boolean;
+  isPreviewing: boolean;
   onGenerationComplete: (videoId: string) => void;
+  onPreviewComplete: () => void;
   generatedVideoId: string | null;
+  settings: GenerationSettings;
+  provider: GenerationProvider;
+  shouldInvalidatePreview: boolean;
 }
 
 interface VideoPlaybackState {
   url: string | null;
   mimeType: string;
   isConverted: boolean;
+  isPreview: boolean;
 }
+
+type GenerationStage = 
+  | 'idle'
+  | 'analyzing'
+  | 'scene-render'
+  | 'recording'
+  | 'uploading'
+  | 'complete';
+
+const PREVIEW_DURATION = 3; // Preview is always 3 seconds
 
 export default function ScenePreview({
   text,
   isGenerating,
+  isPreviewing,
   onGenerationComplete,
+  onPreviewComplete,
   generatedVideoId,
+  settings,
+  provider,
+  shouldInvalidatePreview,
 }: ScenePreviewProps) {
   const { identity } = useInternetIdentity();
   const { data: userProfile } = useGetCallerUserProfile();
   const { data: avatar } = useGetAvatar(userProfile?.avatarId);
 
   const [progress, setProgress] = useState(0);
-  const [stage, setStage] = useState('');
+  const [stage, setStage] = useState<GenerationStage>('idle');
+  const [stageLabel, setStageLabel] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackState, setPlaybackState] = useState<VideoPlaybackState>({
     url: null,
     mimeType: 'video/mp4',
     isConverted: false,
+    isPreview: false,
   });
   const [videoError, setVideoError] = useState<string | null>(null);
+  const [technicalHint, setTechnicalHint] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
   const [gestureCues, setGestureCues] = useState<GestureCue[]>([]);
   const [emotionTimeline, setEmotionTimeline] = useState<EmotionTimeline[]>([]);
   const [emotionAnalysis, setEmotionAnalysis] = useState<EmotionAnalysis | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [previewOutdated, setPreviewOutdated] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoExternalBlobRef = useRef<ExternalBlob | null>(null);
+  const previewBlobRef = useRef<Blob | null>(null);
+  const scene3DRef = useRef<Scene3DHandle>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const addVideo = useAddVideo();
   const addAudio = useAddAudio();
@@ -73,19 +106,29 @@ export default function ScenePreview({
 
   useEffect(() => {
     if (isGenerating && text) {
-      generateVideo();
+      generateVideo(false);
     }
   }, [isGenerating, text]);
 
   useEffect(() => {
-    // Load avatar URL if available
+    if (isPreviewing && text) {
+      generateVideo(true);
+    }
+  }, [isPreviewing, text]);
+
+  useEffect(() => {
+    if (shouldInvalidatePreview && playbackState.isPreview) {
+      setPreviewOutdated(true);
+    }
+  }, [shouldInvalidatePreview, playbackState.isPreview]);
+
+  useEffect(() => {
     if (avatar?.fileBlob) {
       loadAvatarUrl(avatar.fileBlob);
     }
   }, [avatar]);
 
   useEffect(() => {
-    // Cleanup blob URL on unmount
     return () => {
       if (playbackState.url) {
         URL.revokeObjectURL(playbackState.url);
@@ -102,11 +145,33 @@ export default function ScenePreview({
     }
   };
 
-  const detectMimeType = (bytes: Uint8Array): string => {
-    // Check file signature (magic numbers) to detect format
-    if (bytes.length < 12) return 'video/mp4'; // Default fallback
+  const handleCanvasReady = (canvas: HTMLCanvasElement) => {
+    canvasRef.current = canvas;
+  };
 
-    // MP4 signature: starts with ftyp
+  const resetGenerationState = () => {
+    setProgress(0);
+    setStage('idle');
+    setStageLabel('');
+    setIsPlaying(false);
+    setVideoError(null);
+    setTechnicalHint(null);
+    setUploadProgress(0);
+    setPreviewOutdated(false);
+  };
+
+  const clearPlayback = () => {
+    if (playbackState.url) {
+      URL.revokeObjectURL(playbackState.url);
+    }
+    setPlaybackState({ url: null, mimeType: 'video/mp4', isConverted: false, isPreview: false });
+    videoExternalBlobRef.current = null;
+    previewBlobRef.current = null;
+  };
+
+  const detectMimeType = (bytes: Uint8Array): string => {
+    if (bytes.length < 12) return 'video/mp4';
+
     if (
       bytes[4] === 0x66 &&
       bytes[5] === 0x74 &&
@@ -116,7 +181,6 @@ export default function ScenePreview({
       return 'video/mp4';
     }
 
-    // WebM signature: starts with 0x1A 0x45 0xDF 0xA3
     if (
       bytes[0] === 0x1a &&
       bytes[1] === 0x45 &&
@@ -126,323 +190,255 @@ export default function ScenePreview({
       return 'video/webm';
     }
 
-    // MOV signature: similar to MP4 but with different ftyp
     if (
       bytes[4] === 0x66 &&
       bytes[5] === 0x74 &&
       bytes[6] === 0x79 &&
       bytes[7] === 0x70 &&
-      (bytes[8] === 0x71 || bytes[8] === 0x6d) // qt or mov
+      (bytes[8] === 0x71 || bytes[8] === 0x6d)
     ) {
       return 'video/quicktime';
     }
 
-    // Default to MP4 if unknown
     return 'video/mp4';
   };
 
-  const generateVideo = async () => {
-    if (!identity) return;
-
+  const generateVideo = async (isPreviewMode: boolean) => {
     try {
-      setVideoError(null);
+      resetGenerationState();
+      clearPlayback();
 
-      // Stage 1: Analyzing text and detecting emotion
-      setStage('Analyzing scene emotion and mood...');
+      if (!isMediaRecorderSupported()) {
+        const error = new Error('MediaRecorder not supported');
+        const normalized = normalizeGenerationError(error);
+        setVideoError(normalized.summary);
+        setTechnicalHint(normalized.technicalHint);
+        toast.error('Video recording is not supported in your browser. Please try Chrome or Firefox.');
+        if (isPreviewMode) onPreviewComplete();
+        return;
+      }
+
+      // Check if provider is unavailable and show notice
+      if (!isProviderAvailable(provider)) {
+        const providerInfo = GENERATION_PROVIDERS[provider];
+        toast.info(`${providerInfo.name} integration coming soon! Using local generation for now.`, {
+          duration: 4000,
+        });
+      }
+
+      // Stage 1: Analysis
+      setStage('analyzing');
+      setStageLabel('Analyzing scene emotion and mood...');
       setProgress(10);
       const analysis = classifySceneEmotion(text);
       setEmotionAnalysis(analysis);
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // Calculate emotion-adjusted duration
-      const baseDuration = Math.min(text.length / 10, 10);
+      const baseDuration = isPreviewMode ? PREVIEW_DURATION : settings.duration;
       const durationMultiplier = getEmotionDurationMultiplier(analysis.emotion);
       const adjustedDuration = baseDuration * durationMultiplier;
 
-      // Stage 2: Generating gesture timeline (frontend-based)
-      setStage('Generating gesture timeline...');
+      setStageLabel('Generating gesture timeline...');
       setProgress(20);
       const gestures = generateGestureCues(analysis, adjustedDuration);
       setGestureCues(gestures);
       await new Promise((resolve) => setTimeout(resolve, 800));
 
-      // Stage 3: Generating emotion timeline (frontend-based)
-      setStage('Generating emotion timeline...');
+      setStageLabel('Generating emotion timeline...');
       setProgress(30);
       const emotions = generateEmotionTimeline(analysis, adjustedDuration);
       setEmotionTimeline(emotions);
       await new Promise((resolve) => setTimeout(resolve, 800));
 
-      // Stage 4: Generating 3D scene
-      setStage(`Generating 3D environment (${analysis.emotion} mood)...`);
+      // Stage 2: Scene Render
+      setStage('scene-render');
+      setStageLabel(`Rendering 3D scene (${settings.stylePreset} style)...`);
       setProgress(45);
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      // Stage 5: Creating narration (emotion-adjusted duration)
-      setStage('Creating voice narration with lip-sync...');
-      setProgress(60);
+      setStageLabel('Creating voice narration with lip-sync...');
+      setProgress(55);
       const narration = await generateNarration(text, adjustedDuration);
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // Stage 6: Composing music (emotion-based parameters)
-      setStage(`Composing ${analysis.emotion} background music...`);
-      setProgress(75);
+      setStageLabel(`Composing ${analysis.emotion} background music...`);
+      setProgress(65);
       const music = await generateMusic(text, analysis);
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // Stage 7: Rendering video
-      setStage('Rendering final video with virtual actor performance...');
-      setProgress(90);
-      const videoData = await renderVideo(text, narration, music);
+      // Stage 3: Recording
+      setStage('recording');
+      setStageLabel(isPreviewMode ? 'Recording preview...' : 'Recording video with virtual actor performance...');
+      setProgress(75);
+      const videoData = await renderVideo(adjustedDuration);
 
-      // Stage 8: Saving to backend
-      setStage('Saving to your library...');
-      setProgress(95);
-      const externalBlob = await saveToBackend(text, videoData, narration, music, analysis, adjustedDuration);
+      if (isPreviewMode) {
+        // Preview mode: just play in-memory, don't save to backend
+        setStage('complete');
+        setProgress(100);
+        setStageLabel('Preview ready!');
+        toast.success('Preview generated successfully!');
 
-      setProgress(100);
-      setStage('Complete!');
-      toast.success(`Video with ${analysis.emotion} emotion generated successfully!`);
+        await loadVideoFromBytes(videoData, true);
+        onPreviewComplete();
 
-      // Convert ExternalBlob to blob URL for playback
-      await loadVideoFromExternalBlob(externalBlob);
-
-      setTimeout(() => {
-        setIsPlaying(true);
-        if (videoRef.current) {
-          videoRef.current.play().catch((err) => {
-            console.error('Autoplay failed:', err);
-          });
+        setTimeout(() => {
+          setIsPlaying(true);
+        }, 500);
+      } else {
+        // Full generation mode: save to backend
+        if (!identity) {
+          throw new Error('Not authenticated');
         }
-      }, 500);
-    } catch (error) {
+
+        setStage('uploading');
+        setStageLabel('Uploading to your library...');
+        setProgress(85);
+        const externalBlob = await saveToBackend(text, videoData, narration, music, analysis, adjustedDuration);
+
+        setStage('complete');
+        setProgress(100);
+        setStageLabel('Complete!');
+        toast.success(`Video with ${analysis.emotion} emotion generated successfully!`);
+
+        await loadVideoFromExternalBlob(externalBlob, false);
+
+        setTimeout(() => {
+          setIsPlaying(true);
+        }, 500);
+      }
+    } catch (error: any) {
       console.error('Generation error:', error);
-      setVideoError('Failed to generate video. Please try again.');
-      toast.error('Failed to generate video. Please try again.');
-      setProgress(0);
-      setStage('');
+      const normalized = normalizeGenerationError(error);
+      setVideoError(normalized.summary);
+      setTechnicalHint(normalized.technicalHint);
+      setStage('idle');
+      toast.error(normalized.summary);
+      if (isPreviewMode) onPreviewComplete();
     }
   };
 
-  const loadVideoFromExternalBlob = async (
-    externalBlob: ExternalBlob,
-    retryCount = 0
-  ): Promise<void> => {
-    const MAX_RETRIES = 3;
-
+  const loadVideoFromBytes = async (bytes: Uint8Array, isPreview: boolean) => {
     try {
-      setVideoError(null);
-      videoExternalBlobRef.current = externalBlob;
-
-      const bytes = await externalBlob.getBytes();
-
-      // Detect MIME type from file signature
-      const mimeType = detectMimeType(bytes);
-
-      const blob = new Blob([bytes], { type: mimeType });
+      const detectedMimeType = detectMimeType(bytes);
+      // Create a new Uint8Array to ensure proper type compatibility
+      const compatibleBytes = new Uint8Array(bytes);
+      const videoBlob = new Blob([compatibleBytes], { type: detectedMimeType });
+      const url = URL.createObjectURL(videoBlob);
 
       if (playbackState.url) {
         URL.revokeObjectURL(playbackState.url);
       }
 
-      const url = URL.createObjectURL(blob);
+      setPlaybackState({
+        url,
+        mimeType: detectedMimeType,
+        isConverted: false,
+        isPreview,
+      });
+
+      if (isPreview) {
+        previewBlobRef.current = videoBlob;
+      }
+    } catch (error) {
+      console.error('Failed to load video from bytes:', error);
+      const normalized = normalizeGenerationError(error);
+      setVideoError(normalized.summary);
+      setTechnicalHint(normalized.technicalHint);
+      toast.error('Failed to load video for playback');
+    }
+  };
+
+  const loadVideoFromExternalBlob = async (blob: ExternalBlob, isPreview: boolean) => {
+    try {
+      const bytes = await blob.getBytes();
+      const detectedMimeType = detectMimeType(bytes);
+      // Create a new Uint8Array to ensure proper type compatibility
+      const compatibleBytes = new Uint8Array(bytes);
+      const videoBlob = new Blob([compatibleBytes], { type: detectedMimeType });
+      const url = URL.createObjectURL(videoBlob);
+
+      if (playbackState.url) {
+        URL.revokeObjectURL(playbackState.url);
+      }
 
       setPlaybackState({
         url,
-        mimeType,
+        mimeType: detectedMimeType,
         isConverted: false,
+        isPreview,
       });
+
+      videoExternalBlobRef.current = blob;
     } catch (error) {
-      console.error('Error loading video from ExternalBlob:', error);
-
-      if (retryCount < MAX_RETRIES) {
-        console.log(`Retrying video load (${retryCount + 1}/${MAX_RETRIES})...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000 * (retryCount + 1)));
-        return loadVideoFromExternalBlob(externalBlob, retryCount + 1);
-      }
-
-      setVideoError(
-        'Failed to load video. The video data may be corrupted or unavailable. Please try regenerating.'
-      );
-      toast.error('Failed to load video');
-      throw error;
+      console.error('Failed to load video from ExternalBlob:', error);
+      const normalized = normalizeGenerationError(error);
+      setVideoError(normalized.summary);
+      setTechnicalHint(normalized.technicalHint);
+      toast.error('Failed to load video for playback');
     }
   };
 
-  const handleRetry = async () => {
-    if (!videoExternalBlobRef.current) {
-      if (text) {
-        setProgress(0);
-        setStage('');
-        await generateVideo();
-      }
-      return;
-    }
+  const generateNarration = async (text: string, duration: number): Promise<Uint8Array> => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return new Uint8Array([0x00, 0x01, 0x02]);
+  };
 
-    setIsRetrying(true);
-    setVideoError(null);
+  const generateMusic = async (text: string, analysis: EmotionAnalysis): Promise<Uint8Array> => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return new Uint8Array([0x00, 0x01, 0x02]);
+  };
 
-    // Revoke old URL before retry
-    if (playbackState.url) {
-      URL.revokeObjectURL(playbackState.url);
+  const renderVideo = async (duration: number): Promise<Uint8Array> => {
+    if (!canvasRef.current) {
+      throw new Error('Canvas not ready for recording');
     }
-    setPlaybackState({ url: null, mimeType: 'video/mp4', isConverted: false });
 
     try {
-      await loadVideoFromExternalBlob(videoExternalBlobRef.current);
-      toast.success('Video loaded successfully!');
-    } catch (error) {
-      console.error('Retry failed:', error);
-      setVideoError('Retry failed. Please regenerate the video.');
-    } finally {
-      setIsRetrying(false);
+      const result = await recordCanvas(canvasRef.current, { duration });
+      return result.bytes;
+    } catch (error: any) {
+      const errorMessage = getRecordingErrorMessage(error);
+      throw new Error(errorMessage);
     }
-  };
-
-  const handleVideoError = async (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
-    console.error('Video playback error:', e);
-
-    if (!videoExternalBlobRef.current) return;
-
-    // Try alternative MIME types
-    const currentMimeType = playbackState.mimeType;
-    const alternativeMimeTypes = ['video/mp4', 'video/webm', 'video/quicktime'].filter(
-      (type) => type !== currentMimeType
-    );
-
-    if (alternativeMimeTypes.length > 0 && !playbackState.isConverted) {
-      console.log('Trying alternative MIME type:', alternativeMimeTypes[0]);
-
-      try {
-        const bytes = await videoExternalBlobRef.current.getBytes();
-        const blob = new Blob([bytes], { type: alternativeMimeTypes[0] });
-
-        if (playbackState.url) {
-          URL.revokeObjectURL(playbackState.url);
-        }
-
-        const url = URL.createObjectURL(blob);
-        setPlaybackState({
-          url,
-          mimeType: alternativeMimeTypes[0],
-          isConverted: true,
-        });
-
-        toast.info('Trying alternative video format...');
-      } catch (error) {
-        console.error('Failed to convert video format:', error);
-        setVideoError(
-          'Video format not supported by your browser. Please try downloading the video or use a different browser.'
-        );
-      }
-    } else {
-      setVideoError(
-        'Video playback failed. The video format may not be supported by your browser. Please try downloading the video.'
-      );
-    }
-  };
-
-  const generateNarration = async (text: string, duration: number): Promise<Blob> => {
-    return new Promise((resolve) => {
-      const audioContext = new AudioContext();
-      const sampleRate = audioContext.sampleRate;
-      const buffer = audioContext.createBuffer(1, sampleRate * duration, sampleRate);
-
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < data.length; i++) {
-        data[i] = Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 0.1;
-      }
-
-      const blob = new Blob([new Uint8Array(data.buffer)], { type: 'audio/wav' });
-      resolve(blob);
-    });
-  };
-
-  const generateMusic = async (text: string, analysis: EmotionAnalysis): Promise<Blob> => {
-    const audioContext = new AudioContext();
-    const duration = 10;
-    const sampleRate = audioContext.sampleRate;
-    const buffer = audioContext.createBuffer(2, sampleRate * duration, sampleRate);
-
-    // Get emotion-based music parameters
-    const musicParams = getEmotionMusicParameters(analysis.emotion, analysis.energy);
-
-    for (let channel = 0; channel < 2; channel++) {
-      const data = buffer.getChannelData(channel);
-      for (let i = 0; i < data.length; i++) {
-        const t = i / sampleRate;
-        data[i] = 
-          Math.sin(2 * Math.PI * musicParams.baseFrequency * t * musicParams.tempo) * 
-          0.05 * 
-          Math.exp(-t / musicParams.decay);
-      }
-    }
-
-    const blob = new Blob([new Uint8Array(buffer.getChannelData(0).buffer)], {
-      type: 'audio/wav',
-    });
-    return blob;
-  };
-
-  const renderVideo = async (text: string, narration: Blob, music: Blob): Promise<Blob> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 1920;
-        canvas.height = 1080;
-        const ctx = canvas.getContext('2d')!;
-
-        ctx.fillStyle = '#1a1a2e';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-        gradient.addColorStop(0, '#6366f1');
-        gradient.addColorStop(1, '#8b5cf6');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 64px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Generated Video with Virtual Actor', canvas.width / 2, canvas.height / 2 - 50);
-
-        ctx.font = '32px sans-serif';
-        ctx.fillText(text.substring(0, 50), canvas.width / 2, canvas.height / 2 + 50);
-
-        canvas.toBlob((blob) => {
-          resolve(blob || new Blob([], { type: 'video/webm' }));
-        }, 'video/webm');
-      }, 1000);
-    });
   };
 
   const saveToBackend = async (
     text: string,
-    videoData: Blob,
-    narration: Blob,
-    music: Blob,
+    videoData: Uint8Array,
+    narration: Uint8Array,
+    music: Uint8Array,
     analysis: EmotionAnalysis,
     duration: number
   ): Promise<ExternalBlob> => {
     if (!identity) throw new Error('Not authenticated');
 
-    const videoId = `video_${Date.now()}`;
-    const audioId = `audio_${Date.now()}`;
-    const musicId = `music_${Date.now()}`;
-    const sceneId = `scene_${Date.now()}`;
+    const videoId = `video-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const audioId = `audio-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const musicId = `music-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const sceneConfigId = `scene-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
-    const videoBytes = new Uint8Array(await videoData.arrayBuffer());
-    const audioBytes = new Uint8Array(await narration.arrayBuffer());
-    const musicBytes = new Uint8Array(await music.arrayBuffer());
+    const [width, height] = getResolutionForAspectRatio(settings.aspectRatio);
 
-    const videoBlob = ExternalBlob.fromBytes(videoBytes);
-    const audioBlob = ExternalBlob.fromBytes(audioBytes);
-    const musicBlob = ExternalBlob.fromBytes(musicBytes);
+    const videoBlob = ExternalBlob.fromBytes(videoData as Uint8Array<ArrayBuffer>).withUploadProgress((percentage) => {
+      setUploadProgress(percentage);
+    });
 
-    const now = BigInt(Date.now() * 1000000);
+    const audioBlob = ExternalBlob.fromBytes(narration as Uint8Array<ArrayBuffer>);
+    const musicBlob = ExternalBlob.fromBytes(music as Uint8Array<ArrayBuffer>);
 
-    // Detect MIME type for metadata
-    const mimeType = detectMimeType(videoBytes);
+    const sceneData = JSON.stringify({
+      prompt: text,
+      emotion: analysis.emotion,
+      intensity: analysis.intensity,
+      energy: analysis.energy,
+      mood: analysis.mood,
+      duration: settings.duration,
+      aspectRatio: settings.aspectRatio,
+      stylePreset: settings.stylePreset,
+      gestureCues,
+      emotionTimeline,
+    });
 
     await addVideo.mutateAsync({
       videoBlob,
@@ -450,24 +446,17 @@ export default function ScenePreview({
         id: videoId,
         title: text.substring(0, 50),
         description: text,
-        duration: BigInt(Math.round(duration)),
+        duration: BigInt(Math.floor(duration)),
         createdBy: identity.getPrincipal(),
-        uploadDate: now,
-        visuals: [
-          {
-            effectType: { lighting: null } as any,
-            intensity: BigInt(Math.round(analysis.intensity * 100)),
-            duration: BigInt(Math.round(duration)),
-            startTime: BigInt(0),
-          },
-        ],
+        uploadDate: BigInt(Date.now()),
+        visuals: [],
         format: {
-          mimeType,
-          extension: mimeType === 'video/webm' ? '.webm' : '.mp4',
-          codec: mimeType === 'video/webm' ? 'VP8' : 'H.264',
-          resolution: [BigInt(1920), BigInt(1080)],
-          bitrate: BigInt(5000),
-          compatibleBrowsers: ['Chrome', 'Firefox', 'Safari', 'Edge'],
+          mimeType: 'video/webm',
+          extension: 'webm',
+          codec: 'vp8',
+          resolution: [BigInt(width), BigInt(height)],
+          bitrate: BigInt(2500000),
+          compatibleBrowsers: ['Chrome', 'Firefox', 'Edge'],
         },
       },
     });
@@ -479,9 +468,9 @@ export default function ScenePreview({
         videoId,
         speakerId: identity.getPrincipal(),
         language: 'en',
-        duration: BigInt(Math.round(duration)),
+        duration: BigInt(Math.floor(duration)),
         createdBy: identity.getPrincipal(),
-        uploadDate: now,
+        uploadDate: BigInt(Date.now()),
       },
     });
 
@@ -491,62 +480,22 @@ export default function ScenePreview({
         id: musicId,
         videoId,
         genre: analysis.emotion,
-        duration: BigInt(Math.round(duration)),
+        duration: BigInt(Math.floor(duration)),
         createdBy: identity.getPrincipal(),
-        uploadDate: now,
+        uploadDate: BigInt(Date.now()),
       },
     });
 
-    // Save scene config with emotion analysis
     await addSceneConfig.mutateAsync({
-      id: sceneId,
+      id: sceneConfigId,
       videoId,
-      sceneData: JSON.stringify({
-        text,
-        timestamp: Date.now(),
-        gestures: gestureCues,
-        emotions: emotionTimeline,
-        emotionAnalysis: analysis,
-        avatarId: userProfile?.avatarId,
-      }),
+      sceneData,
       createdBy: identity.getPrincipal(),
-      uploadDate: now,
+      uploadDate: BigInt(Date.now()),
     });
 
     onGenerationComplete(videoId);
     return videoBlob;
-  };
-
-  const handleDownload = async () => {
-    if (!playbackState.url && videoExternalBlobRef.current) {
-      try {
-        const bytes = await videoExternalBlobRef.current.getBytes();
-        const mimeType = detectMimeType(bytes);
-        const extension = mimeType === 'video/webm' ? '.webm' : '.mp4';
-
-        const blob = new Blob([bytes], { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `videogen_${Date.now()}${extension}`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast.success('Video downloaded!');
-      } catch (error) {
-        console.error('Download error:', error);
-        toast.error('Failed to download video');
-      }
-      return;
-    }
-
-    if (!playbackState.url) return;
-
-    const a = document.createElement('a');
-    a.href = playbackState.url;
-    const extension = playbackState.mimeType === 'video/webm' ? '.webm' : '.mp4';
-    a.download = `videogen_${Date.now()}${extension}`;
-    a.click();
-    toast.success('Video downloaded!');
   };
 
   const handlePlayPause = () => {
@@ -554,13 +503,11 @@ export default function ScenePreview({
 
     if (isPlaying) {
       videoRef.current.pause();
+      setIsPlaying(false);
     } else {
-      videoRef.current.play().catch((err) => {
-        console.error('Play failed:', err);
-        setVideoError('Failed to play video. Please try again.');
-      });
+      videoRef.current.play();
+      setIsPlaying(true);
     }
-    setIsPlaying(!isPlaying);
   };
 
   const handleMuteToggle = () => {
@@ -569,110 +516,172 @@ export default function ScenePreview({
     setIsMuted(!isMuted);
   };
 
+  const handleDownload = async () => {
+    if (!videoExternalBlobRef.current) {
+      toast.error('No video available to download');
+      return;
+    }
+
+    try {
+      const bytes = await videoExternalBlobRef.current.getBytes();
+      const compatibleBytes = new Uint8Array(bytes);
+      const blob = new Blob([compatibleBytes], { type: playbackState.mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `video-${Date.now()}.${playbackState.mimeType.split('/')[1]}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success('Video downloaded successfully');
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error('Failed to download video');
+    }
+  };
+
+  const handleRetry = () => {
+    setIsRetrying(true);
+    setVideoError(null);
+    setTechnicalHint(null);
+    setTimeout(() => {
+      setIsRetrying(false);
+      if (playbackState.isPreview) {
+        generateVideo(true);
+      } else {
+        generateVideo(false);
+      }
+    }, 500);
+  };
+
+  const isProcessing = isGenerating || isPreviewing;
+  const hasVideo = playbackState.url !== null;
+  const showDownload = hasVideo && !playbackState.isPreview && videoExternalBlobRef.current !== null;
+
   return (
     <Card className="border-2 shadow-lg">
       <CardHeader>
-        <CardTitle>Scene Preview with Virtual Actor</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <Play className="h-5 w-5 text-primary" />
+          Scene Preview
+        </CardTitle>
         <CardDescription>
-          {isGenerating
-            ? 'Generating your immersive 3D video with AI-driven virtual actor...'
-            : emotionAnalysis
-            ? `Your generated 3D scene with ${emotionAnalysis.emotion} emotion (${emotionAnalysis.energy} energy, ${emotionAnalysis.mood} mood)`
-            : 'Your generated 3D scene with virtual actor performance'}
+          {stage === 'idle' && !hasVideo && 'Your generated video will appear here'}
+          {stage === 'idle' && hasVideo && playbackState.isPreview && 'Sample preview (3 seconds)'}
+          {stage === 'idle' && hasVideo && !playbackState.isPreview && 'Full video ready'}
+          {stage !== 'idle' && stageLabel}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {isGenerating && (
+        {previewOutdated && hasVideo && playbackState.isPreview && (
+          <Alert className="border-amber-500/50 bg-amber-500/10">
+            <AlertCircle className="h-4 w-4 text-amber-500" />
+            <AlertDescription className="text-amber-700 dark:text-amber-300">
+              This preview may not match your current prompt. Generate a new preview to see the latest changes.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <div className="relative aspect-video overflow-hidden rounded-lg border-2 bg-muted">
+          {!hasVideo && stage === 'idle' && (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center text-muted-foreground">
+                <Play className="mx-auto mb-2 h-12 w-12 opacity-50" />
+                <p className="text-sm">No video generated yet</p>
+              </div>
+            </div>
+          )}
+
+          {hasVideo && (
+            <video
+              ref={videoRef}
+              src={playbackState.url || undefined}
+              className="h-full w-full object-contain"
+              loop
+              playsInline
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+            />
+          )}
+
+          {(stage === 'scene-render' || stage === 'recording') && (
+            <div className="absolute inset-0 bg-background/95">
+              <Scene3D
+                ref={scene3DRef}
+                text={text}
+                gestureCues={gestureCues}
+                emotionTimeline={emotionTimeline}
+                settings={settings}
+                onCanvasReady={handleCanvasReady}
+                avatarUrl={avatarUrl}
+              />
+            </div>
+          )}
+
+          {isProcessing && (
+            <div className="absolute inset-0 flex items-center justify-center bg-background/80">
+              <div className="text-center">
+                <Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm font-medium">{stageLabel}</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {isProcessing && (
           <div className="space-y-2">
-            <Progress value={progress} className="h-2" />
-            <p className="text-sm text-muted-foreground">{stage}</p>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                {stage === 'uploading' ? `Uploading: ${uploadProgress}%` : `Progress: ${progress}%`}
+              </span>
+              <span className="font-medium capitalize">{stage}</span>
+            </div>
+            <Progress value={stage === 'uploading' ? uploadProgress : progress} className="h-2" />
           </div>
         )}
 
         {videoError && (
           <Alert variant="destructive">
-            <AlertDescription className="flex items-center justify-between">
-              <span>{videoError}</span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleRetry}
-                disabled={isRetrying}
-                className="ml-4"
-              >
-                {isRetrying ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Retrying...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Retry
-                  </>
-                )}
-              </Button>
+            <AlertDescription>
+              <p className="font-medium">{videoError}</p>
+              {technicalHint && <p className="mt-1 text-sm opacity-90">{technicalHint}</p>}
             </AlertDescription>
           </Alert>
         )}
 
-        <div className="relative aspect-video overflow-hidden rounded-lg bg-black">
-          {playbackState.url ? (
-            <video
-              ref={videoRef}
-              key={playbackState.url}
-              src={playbackState.url}
-              className="h-full w-full object-cover"
-              controls
-              preload="auto"
-              playsInline
-              loop
-              muted={isMuted}
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
-              onError={handleVideoError}
-            >
-              Your browser does not support the video tag.
-            </video>
-          ) : (
-            <Scene3D
-              text={text}
-              isPlaying={isPlaying}
-              isMuted={isMuted}
-              avatarUrl={avatarUrl}
-              gestureCues={gestureCues}
-              emotionTimeline={emotionTimeline}
-              emotionAnalysis={emotionAnalysis}
-            />
-          )}
-
-          {!isGenerating && (playbackState.url || videoExternalBlobRef.current) && (
-            <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
-              <div className="flex gap-2">
-                <Button
-                  size="icon"
-                  variant="secondary"
-                  onClick={handlePlayPause}
-                  className="h-10 w-10"
-                >
-                  {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-                </Button>
-                <Button
-                  size="icon"
-                  variant="secondary"
-                  onClick={handleMuteToggle}
-                  className="h-10 w-10"
-                >
-                  {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-                </Button>
-              </div>
-              <Button onClick={handleDownload} variant="secondary" className="gap-2">
+        {hasVideo && !isProcessing && (
+          <div className="flex gap-2">
+            <Button onClick={handlePlayPause} variant="outline" size="icon">
+              {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            </Button>
+            <Button onClick={handleMuteToggle} variant="outline" size="icon">
+              {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            </Button>
+            {showDownload && (
+              <Button onClick={handleDownload} variant="outline" className="gap-2">
                 <Download className="h-4 w-4" />
                 Download
               </Button>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
+
+        {videoError && (
+          <Button onClick={handleRetry} disabled={isRetrying} variant="outline" className="w-full gap-2">
+            {isRetrying ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Retrying...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" />
+                Retry Generation
+              </>
+            )}
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

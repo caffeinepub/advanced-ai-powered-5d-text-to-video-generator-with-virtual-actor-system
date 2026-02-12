@@ -1,19 +1,34 @@
-import { useState } from 'react';
-import { Sparkles, Video as VideoIcon, User } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import TextInput from '../components/TextInput';
 import ScenePreview from '../components/ScenePreview';
-import VideoLibrary from '../components/VideoLibrary';
 import AvatarSetup from '../components/AvatarSetup';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import VideoLibrary from '../components/VideoLibrary';
+import PromptConfigControls from '../components/PromptConfigControls';
+import { DEFAULT_SETTINGS, type GenerationSettings } from '../utils/generationSettings';
+import { getGenerationProvider, setGenerationProvider, type GenerationProvider } from '../utils/generationProvider';
 
 export default function VideoGenerator() {
-  const [inputText, setInputText] = useState('');
+  const [text, setText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
   const [generatedVideoId, setGeneratedVideoId] = useState<string | null>(null);
+  const [settings, setSettings] = useState<GenerationSettings>(DEFAULT_SETTINGS);
+  const [provider, setProvider] = useState<GenerationProvider>(getGenerationProvider());
+  const [promptVersion, setPromptVersion] = useState(0);
 
-  const handleGenerate = () => {
+  const handleTextChange = (newText: string) => {
+    setText(newText);
+    // Increment version to signal preview invalidation
+    setPromptVersion((prev) => prev + 1);
+  };
+
+  const handleGenerateFull = () => {
     setIsGenerating(true);
-    setGeneratedVideoId(null);
+  };
+
+  const handleGeneratePreview = () => {
+    setIsPreviewing(true);
   };
 
   const handleGenerationComplete = (videoId: string) => {
@@ -21,77 +36,71 @@ export default function VideoGenerator() {
     setIsGenerating(false);
   };
 
+  const handlePreviewComplete = () => {
+    setIsPreviewing(false);
+  };
+
+  const handleProviderChange = (newProvider: GenerationProvider) => {
+    setProvider(newProvider);
+    setGenerationProvider(newProvider);
+  };
+
   return (
-    <div className="relative min-h-screen">
-      {/* Hero Background */}
-      <div className="absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-background to-accent/20" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,oklch(var(--primary)/0.1),transparent_50%)]" />
+    <div className="container mx-auto max-w-7xl space-y-6 px-4 py-8">
+      <div className="space-y-2">
+        <h1 className="text-3xl font-bold tracking-tight">Video Studio</h1>
+        <p className="text-muted-foreground">
+          Create stunning 3D videos with AI-powered virtual actors and emotion-driven animation
+        </p>
       </div>
 
-      <div className="container mx-auto px-4 py-12">
-        {/* Hero Section */}
-        <div className="mb-12 text-center">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
-            <Sparkles className="h-4 w-4" />
-            AI-Powered 3D Video Generation with Virtual Actors
-          </div>
-          <h1 className="mb-4 text-5xl font-bold tracking-tight md:text-6xl lg:text-7xl">
-            Transform Text into
-            <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
-              {' '}
-              Immersive 3D Videos
-            </span>
-          </h1>
-          <p className="mx-auto max-w-2xl text-lg text-muted-foreground md:text-xl">
-            Create stunning animated 3D environments with AI-driven virtual actors performing realistic gestures, emotions, and lip-sync.
-          </p>
-        </div>
+      <Tabs defaultValue="create" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="create">Create</TabsTrigger>
+          <TabsTrigger value="avatars">Avatars</TabsTrigger>
+          <TabsTrigger value="library">Library</TabsTrigger>
+        </TabsList>
 
-        {/* Main Content */}
-        <Tabs defaultValue="create" className="w-full">
-          <TabsList className="mb-8 grid w-full max-w-2xl mx-auto grid-cols-3">
-            <TabsTrigger value="create" className="gap-2">
-              <Sparkles className="h-4 w-4" />
-              Create
-            </TabsTrigger>
-            <TabsTrigger value="avatars" className="gap-2">
-              <User className="h-4 w-4" />
-              Avatars
-            </TabsTrigger>
-            <TabsTrigger value="library" className="gap-2">
-              <VideoIcon className="h-4 w-4" />
-              My Videos
-            </TabsTrigger>
-          </TabsList>
+        <TabsContent value="create" className="space-y-6">
+          <PromptConfigControls
+            settings={settings}
+            onChange={setSettings}
+            provider={provider}
+            onProviderChange={handleProviderChange}
+          />
 
-          <TabsContent value="create" className="space-y-8">
+          <div className="grid gap-6 lg:grid-cols-2">
             <TextInput
-              value={inputText}
-              onChange={setInputText}
-              onGenerate={handleGenerate}
+              value={text}
+              onChange={handleTextChange}
+              onGenerateFull={handleGenerateFull}
+              onGeneratePreview={handleGeneratePreview}
               isGenerating={isGenerating}
+              isPreviewing={isPreviewing}
             />
 
-            {(inputText || isGenerating || generatedVideoId) && (
-              <ScenePreview
-                text={inputText}
-                isGenerating={isGenerating}
-                onGenerationComplete={handleGenerationComplete}
-                generatedVideoId={generatedVideoId}
-              />
-            )}
-          </TabsContent>
+            <ScenePreview
+              text={text}
+              isGenerating={isGenerating}
+              isPreviewing={isPreviewing}
+              onGenerationComplete={handleGenerationComplete}
+              onPreviewComplete={handlePreviewComplete}
+              generatedVideoId={generatedVideoId}
+              settings={settings}
+              provider={provider}
+              shouldInvalidatePreview={promptVersion > 0}
+            />
+          </div>
+        </TabsContent>
 
-          <TabsContent value="avatars">
-            <AvatarSetup />
-          </TabsContent>
+        <TabsContent value="avatars">
+          <AvatarSetup />
+        </TabsContent>
 
-          <TabsContent value="library">
-            <VideoLibrary />
-          </TabsContent>
-        </Tabs>
-      </div>
+        <TabsContent value="library">
+          <VideoLibrary />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
